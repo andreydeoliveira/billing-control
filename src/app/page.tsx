@@ -1,21 +1,12 @@
-import { PrismaClient } from "@prisma/client";
+// app/page.tsx
+'use client'
+import SimpleSidebar from "./components/simplesidebar/simplesidebar"
 
-
-const prisma = new PrismaClient()
-
-
-export default async function Home() {
-
-  const entries = await prisma.entry.findMany();
-
+export default async function Page() {
   return (
-    <div>
+    //<SimpleSidebar>Tete</SimpleSidebar>
+    <h1>teste
       
-      {entries.map((valor) => (
-        <h1 key={valor.id}>{valor.title}</h1>
-      ))}
-
-    </div>
-  );
-
+    </h1>
+  )
 }
