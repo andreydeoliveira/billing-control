@@ -31,3 +31,32 @@ enum Mood{
   Exhausted
   Anxious
 }
+
+
+model Conta{
+  id String @id @default(uuid())
+  name String
+  observacao String @db.Text
+  datacriacao DateTime @default(now())
+  dataatualizacao DateTime  @updatedAt
+  classificacoes Conta_Classificacao[]
+}
+
+model Classificacao {
+  id String @id @default(uuid())
+  name String
+  observacao String @db.Text
+  datacriacao DateTime @default(now())
+  dataatualizacao DateTime  @updatedAt
+  contas Conta_Classificacao[]
+}
+
+
+model Conta_Classificacao {
+  id String @id @default(uuid())
+  conta Conta @relation(fields: [contaId], references: [id])
+  contaId String  
+  datacriacao DateTime @default(now())
+  classificacao Classificacao @relation(fields: [classificacaoId], references: [id])
+  classificacaoId String  
+}

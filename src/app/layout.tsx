@@ -1,7 +1,7 @@
 'use client'
 
 import { ChakraProvider } from '@chakra-ui/react'
-import SimpleSidebar from './components/simplesidebar/simplesidebar';
+import NavBar from './components/navbar/navbar'
 
 export default function RootLayout({
   children,
@@ -9,12 +9,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    //<html lang="en">
+    <html lang="en">
       <ChakraProvider>
-        <SimpleSidebar />
-          {children}
+        <NavBar />
+        {children}
       </ChakraProvider>      
-    //</html>
+    </html>
   );
 }
 
