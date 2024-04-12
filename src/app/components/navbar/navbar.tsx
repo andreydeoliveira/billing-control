@@ -26,10 +26,9 @@ interface Props {
 
 const Links = [
     {name: 'Home', href: "/"},
-    {name: 'Movimentações', href: 'api/movimentacoes'},
-    {name: 'Contas', href: 'api/contas'},
-    {name: 'Cartões', href: 'ap/cartoes'},
-    {name: 'Lançamentos esperados', href: 'lancamentos'}]
+    {name: 'Movimentações', href: '/api/movimentacoes'},
+    {name: 'Cadastros', href: '/api/cadastros'},
+    {name: 'Lançamentos esperados', href: '/api/lancamentos'}]
 
 const NavLink = (props: Props) => {
   const { children } = props
