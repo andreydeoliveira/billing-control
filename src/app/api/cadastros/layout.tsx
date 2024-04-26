@@ -71,7 +71,7 @@ export default function DashboardLayout({
                 {children}
             </Box>
         </Box> 
-      {children}
+      {/*children*/}
     </section>
   )
 }

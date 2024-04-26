@@ -1,84 +1,38 @@
-'use client'
+import { Table, TableContainer } from "@chakra-ui/react";
+import prisma from "../../../db/prisma";
+import TdClient from "./tableClient";
 
-import { useEffect, useState } from 'react';
 
-import {
-    Table,
-    Thead,
-    Tbody,
-    Tfoot,
-    Tr,
-    Th,
-    Td,
-    TableCaption,
-    TableContainer,
-} from '@chakra-ui/react'
-
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient()
 
 export default async function Classificacao() {
 
-    const [classific, setClassific] = useState<{ id: string; name: string; observacao: string; datacriacao: Date; dataatualizacao: Date; }[]>([]);
+ 
+  // Função para atualizar os dados da tabela
+  const updateTableData = async () => {
+    'use server'
+    const newData = await prisma.classificacao.findMany();
+    return newData;
+  };
 
-    useEffect(() => {
-        async function fetchData() {
-            const data = await prisma.classificacao.findMany();
-            setClassific(data);
-        }
+  const deleteData = async (idRef :string) => {
+    'use server'
+    await prisma.classificacao.deleteMany({
+      where: {
+        id: idRef
+      }
+    })
+  }
 
-        fetchData();
-    }, []);
+   
 
-    //const classific = await prisma.classificacao.findMany();
-
-    return (        
-
-        <TableContainer>
-            <Table variant='striped' colorScheme='teal'>
-                <TableCaption>oi to metric conversion factors</TableCaption>
-                <Thead>
-                    <Tr>
-                        <Td isNumeric>id</Td>
-                        <Th>Conta</Th>
-                        <Th>Observação</Th>
-                        <Th>Criação</Th>                        
-                        <Th>Data Alteração</Th>
-                    </Tr>
-                </Thead>
-                <Tbody>
-
-
-
-                    {classific.map((valor, index) => {
-                       
-                        return (
-                        <Tr key={index}>
-                            <Td>{index+1}</Td>
-                            <Td>{valor.name}</Td>
-                            <Td>{valor.observacao}</Td>
-                            <Td>{new Date(valor.datacriacao).toLocaleDateString()}</Td>
-                            <Td>{new Date(valor.dataatualizacao).toLocaleDateString()}</Td>
-                        </Tr>
-
-                    )})}
-
-
-
-
-                </Tbody>
-               {/* <Tfoot>
-                    <Tr>
-                        <Th>Conta</Th>
-                        <Th>Observação</Th>
-                        <Th>Criação</Th>
-                        <Th>Data Alteração</Th>
-                    </Tr>
-                </Tfoot>*/}
-            </Table>
-        </TableContainer>
-
-    )
-
+    return (
+        <>
+      <TableContainer>
+        <Table variant="striped" colorScheme="teal">
+          <TdClient classificacao={await prisma.classificacao.findMany()} deleteData={deleteData} updateData={updateTableData} />
+        </Table>
+      </TableContainer>
+    </>
+  );
+    
 }

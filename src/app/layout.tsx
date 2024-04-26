@@ -1,6 +1,6 @@
 'use client'
 
-import { ChakraProvider } from '@chakra-ui/react'
+import { ChakraProvider, Flex, Container } from '@chakra-ui/react'
 import NavBar from './components/navbar/navbar'
 
 export default function RootLayout({
@@ -10,10 +10,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+       
+      <body>
       <ChakraProvider>
+      {/*<Flex as="header" position="fixed" backgroundColor="rgba(255,  255, 255, 0.8)" backdropFilter="saturate(180%) blur(5px)"  w="100%">*/}
         <NavBar />
-        {children}
-      </ChakraProvider>      
+        {/*</Flex>}*/}
+          {children}
+       </ChakraProvider>      
+      </body>
     </html>
   );
 }
