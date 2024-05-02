@@ -1,56 +1,76 @@
 'use client'
 
-import { Button, Tbody, Td, Th, Thead, Tr } from "@chakra-ui/react";
-import { useState } from "react";
-import { MdDeleteForever } from "react-icons/md";
-
+import React, { useState, useRef } from "react";
+import {
+    Button,
+    FormControl,
+    FormLabel,
+    Input,
+    Menu,
+    MenuButton,
+    MenuItem,
+    MenuList,
+    Modal,
+    ModalBody,
+    ModalCloseButton,
+    ModalContent,
+    ModalFooter,
+    ModalHeader,
+    ModalOverlay,
+    Tbody,
+    Td,
+    Textarea,
+    Th,
+    Thead,
+    Tr,
+    useDisclosure,
+} from "@chakra-ui/react";
+import { ChevronDownIcon } from "@chakra-ui/icons";
 import { Classificacao as ClassificacaoTable } from "@prisma/client";
-
+import { deleteClassificacao, insertClassificacao, updateClassificacao } from "@/db/dbClassificacao";
 
 interface Props {
-    classificacao?: ClassificacaoTable[],
-    deleteData?: (idRef: string) => void,
-    updateData?: () => Promise<ClassificacaoTable[]>;
+    classificacao?: ClassificacaoTable[];
 }
 
-export default function TdClient({
-    classificacao: tableData,
-    deleteData,
-    updateData }: Props) {
+export default function TdClient({ classificacao }: Props) {
+    const { isOpen, onOpen, onClose } = useDisclosure();
+    const [tableDataRef, setTableData] = useState(classificacao || []);
+    const [nameRef, setNameRef] = useState('');
+    const [observacaoRef, setObservacaoRef] = useState('')
+    const [idRef, setIdRef] = useState('');
 
-    const [isLoading, setLoading] = useState<{ [key: string]: boolean }>({});
-    const [tableDataRef, setTableData] = useState(tableData || []);
+    const deleteTableData = (idParam: string) => {
+        deleteClassificacao(idParam);
+        setTableData((prevData) => prevData.filter((item) => item.id !== idParam));
+    };
 
-    const deleteTableData = (id: string) => {
+    const saveData = async () => {
+        let newData;
 
-        if (!deleteData || !tableData) {
-            return;
+        if (idRef) {
+            newData = await updateClassificacao(idRef, nameRef, observacaoRef);
+        } else {
+            newData = await insertClassificacao(nameRef, observacaoRef);
         }
 
-        setLoading((prevStats) => {
-            prevStats[id] = true
-            return prevStats
-        });
-
-        setTableData((prevData) => prevData.filter((item) => item.id !== id));
-
-        deleteData(id)
-
-        setLoading((prevStats) => {
-            delete prevStats[id]
-            return prevStats
-        });
-    }
-
-    // Função para atualizar os dados da tabela
-    const updateTableData = async () => {
-
-        if (!updateData || !tableData) {
-            return;
-        }
-
-        const newData = await updateData();
         setTableData(newData);
+        handleCloseModal();
+    };
+
+    const editItem = (valor: ClassificacaoTable) => {
+
+        setNameRef(valor.name)
+        setObservacaoRef(valor.observacao)
+        setIdRef(valor.id)
+
+        onOpen()
+
+    };
+
+    const handleCloseModal = () => {
+        setIdRef('');
+        onClose();
     };
 
     return (
@@ -61,7 +81,7 @@ export default function TdClient({
                     <Th>Observação</Th>
                     <Th>Data</Th>
                     <Th>
-                        {/*<Button onClick={onOpen}>Inserir</Button>*/}
+                        <Button onClick={onOpen}>Inserir</Button>
                     </Th>
                 </Tr>
             </Thead>
@@ -72,22 +92,43 @@ export default function TdClient({
                         <Td>{valor.observacao}</Td>
                         <Td>{valor.datacriacao.toISOString()}</Td>
                         <Td width="1%">
-                            <Button
-                                id={valor.id}
-                                leftIcon={<MdDeleteForever />}
-                                isLoading={isLoading[valor.id]}
-                                onClick={() => deleteTableData(valor.id)} // Passando a função de handleClick para o evento onClick do botão
-                                loadingText="Deleting"
-                                colorScheme="teal"
-                                variant="outline"
-                                spinnerPlacement="end"
-                            >
-                                Apagar
-                            </Button>
+                            <Menu>
+                                <MenuButton as={Button} rightIcon={<ChevronDownIcon />}>
+                                    Settings
+                                </MenuButton>
+                                <MenuList>
+                                    <MenuItem onClick={() => editItem(valor)}>Editar</MenuItem>
+                                    <MenuItem onClick={() => deleteTableData(valor.id)}>Apagar</MenuItem>
+                                </MenuList>
+                            </Menu>
                         </Td>
                     </Tr>
                 ))}
             </Tbody>
+
+            <Modal isOpen={isOpen} onClose={handleCloseModal}>
+                <ModalOverlay />
+                <ModalContent>
+                    <ModalHeader>Editar Item</ModalHeader>
+                    <ModalCloseButton />
+                    <ModalBody>
+                        <FormControl>
+                            <FormLabel>Classificação</FormLabel>
+                            <Input value={nameRef} onChange={(e) => setNameRef(e.target.value)} />
+                        </FormControl>
+                        <FormControl>
+                            <FormLabel>Observação</FormLabel>
+                            <Textarea value={observacaoRef} onChange={(e) => setObservacaoRef(e.target.value)} />
+                        </FormControl>
+                    </ModalBody>
+                    <ModalFooter>
+                        <Button colorScheme="blue" mr={3} onClick={saveData}>
+                            Salvar
+                        </Button>
+                        <Button onClick={handleCloseModal}>Cancelar</Button>
+                    </ModalFooter>
+                </ModalContent>
+            </Modal>
         </>
-    )
+    );
 }
