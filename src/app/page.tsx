@@ -1,21 +1,8 @@
-import { PrismaClient } from "@prisma/client";
+// app/page.tsx
+'use client'
 
-
-const prisma = new PrismaClient()
-
-
-export default async function Home() {
-
-  const entries = await prisma.entry.findMany();
-
+export default async function Page() {
   return (
-    <div>
-      
-      {entries.map((valor) => (
-        <h1 key={valor.id}>{valor.title}</h1>
-      ))}
-
-    </div>
-  );
-
+  <></>
+  )
 }
