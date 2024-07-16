@@ -1,31 +1,60 @@
 "use client";
 
 import { useState } from "react";
-import { MonthPicker } from "react-lite-month-picker";
+import { Box, Button, Flex, Text } from "@chakra-ui/react";
+import { useDayzed } from "dayzed";
 
-export default function LancamentosEsperados() {
-    const [selectedMonthData, setSelectedMonthData] = useState({
-        month: 9,
-        year: 2023,
+const MonthPicker = () => {
+    const [selectedMonth, setSelectedMonth] = useState<{
+        month: number;
+        year: number;
+    }>();
+
+    const { calendars, getBackProps, getForwardProps } = useDayzed({
+        selected: selectedMonth
+            ? new Date(selectedMonth.year, selectedMonth.month)
+            : undefined,
+        numberOfMonths: 1,
     });
-    const [isPickerOpen, setIsPickerOpen] = useState(false);
+
+    const handleMonthClick = (month: number, year: number) => {
+        setSelectedMonth({ month, year });
+    };
 
     return (
-        <>
-            <div>
-                <MonthInput
-                    selected={selectedMonthData}
-                    setShowMonthPicker={setIsPickerOpen}
-                    showMonthPicker={isPickerOpen}
-                />
-                {isPickerOpen ? (
-                    <MonthPicker
-                        setIsOpen={setIsPickerOpen}
-                        selected={selectedMonthData}
-                        onChange={setSelectedMonthData}
-                    />
-                ) : null}
-            </div>
-        </>
+        <Box>
+            <Flex justify="space-between" align="center" mb={4}>
+                <Button {...getBackProps()}>Anterior</Button>
+                <Text fontSize="xl">
+                    {selectedMonth
+                        ? `${selectedMonth.month + 1} / ${selectedMonth.year}`
+                        : "Selecione um mês"}
+                </Text>
+                <Button {...getForwardProps()}>Próximo</Button>
+            </Flex>
+            <Flex flexWrap="wrap">
+                {calendars.map((calendar) =>
+                    calendar.weeks.map((week) =>
+                        week.map((day) => (
+                            <Box
+                                key={`${day.month}-${day.day}`}
+                                flexBasis="14.28%"
+                                textAlign="center"
+                                py={2}
+                                cursor="pointer"
+                                onClick={() =>
+                                    handleMonthClick(day.month, day.year)
+                                }
+                                _hover={{ bg: "gray.100" }}
+                            >
+                                {day.day}
+                            </Box>
+                        ))
+                    )
+                )}
+            </Flex>
+        </Box>
     );
-}
+};
+
+export default MonthPicker;
