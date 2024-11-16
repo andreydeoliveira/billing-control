@@ -22,6 +22,8 @@ model Conta {
   dataatualizacao DateTime      @updatedAt
   classificacao   Classificacao @relation(fields: [classificacaoId], references: [id])
   classificacaoId String
+  movimentacoesOrigem  Movimentacao[] @relation("ContaOrigem")
+  movimentacoesDestino Movimentacao[] @relation("ContaDestino")
 }
 
 model Classificacao {
@@ -45,4 +47,18 @@ model ContaBancaria {
   name           String
   datacriacao    DateTime @default(now())
   dataatualizacao DateTime @updatedAt
+}
+
+model Movimentacao {
+  id              String   @id @default(uuid())
+  contaOrigemId   String
+  contaDestinoId  String
+  contaOrigem     Conta    @relation("ContaOrigem", fields: [contaOrigemId], references: [id])
+  contaDestino    Conta    @relation("ContaDestino", fields: [contaDestinoId], references: [id])
+  valor           Float
+  dataVencimento   DateTime
+  dataPago         DateTime
+  datacriacao     DateTime @default(now())
+  dataatualizacao DateTime @updatedAt
+  observacao      String   @db.Text
 }

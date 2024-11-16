@@ -3,6 +3,7 @@
 import { ChakraProvider, Flex, Container } from "@chakra-ui/react";
 import NavBar from "./components/navbar/navbar";
 
+
 export default function RootLayout({
   children,
 }: Readonly<{
