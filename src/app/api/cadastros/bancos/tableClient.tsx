@@ -93,7 +93,7 @@ export default function TdClient({ contaBancaria }: Props) {
                     <Th>Conta</Th>
                     <Th>Data</Th>
                     <Th>
-                        <Button onClick={onOpen}>Inserir</Button>
+                        <Button colorScheme='teal' onClick={onOpen}>Inserir</Button>
                     </Th>
                 </Tr>
             </Thead>
