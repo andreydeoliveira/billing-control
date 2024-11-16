@@ -29,13 +29,12 @@ import {
 } from "@chakra-ui/react";
 import { ChevronDownIcon, DeleteIcon, EditIcon } from "@chakra-ui/icons";
 import {
-    Conta as ContaTable,
     Classificacao as ClassificacaoTable
 } from "@prisma/client";
-import { deleteConta, insertConta, updateConta } from "@/db/dbConta";
+import { deleteConta, insertConta, updateConta, ContaWithClassificacao } from "@/db/dbConta";
 
 interface Props {
-    conta?: ContaTable[],
+    conta?: ContaWithClassificacao[],
     classificacao?: ClassificacaoTable[],
 }
 
@@ -78,11 +77,11 @@ export default function TdClient({ conta, classificacao }: Props) {
         }
     };
 
-    const editItem = (valor: ContaTable) => {
+    const editItem = (valor: ContaWithClassificacao) => {
 
         setNameRefInit(valor.name)
         setObservacaoRefInit(valor.observacao)
-        setClassificacaoIdRefInit(valor.classificacaoId)
+        setClassificacaoIdRefInit(valor.classificacao.id)
         setIdRef(valor.id)
 
         onOpen()
