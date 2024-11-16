@@ -2,12 +2,25 @@
 
 import prisma from "./prisma";
 
-export async function getFullConta() {
+export type ContaWithClassificacao = {
+    id: string;
+    name: string;
+    observacao: string;
+    datacriacao: Date;
+    dataatualizacao: Date;
+    classificacao: {
+        id: string;
+        name: string;
+    };
+};
+
+export async function getFullConta(): Promise<ContaWithClassificacao[]> {
     return await prisma.conta.findMany({
         include: {
             classificacao: {
                 select: {
-                    name: true
+                    name: true,
+                    id: true
                 }
             }
         }
