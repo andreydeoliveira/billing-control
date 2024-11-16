@@ -105,7 +105,7 @@ export default function TdClient({ classificacao }: Props) {
           <Th>Observação</Th>
           <Th>Data</Th>
           <Th>
-            <Button onClick={onOpen}>Inserir</Button>
+            <Button colorScheme='teal' onClick={onOpen}>Inserir</Button>
           </Th>
         </Tr>
       </Thead>

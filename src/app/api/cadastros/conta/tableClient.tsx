@@ -111,7 +111,7 @@ export default function TdClient({ conta, classificacao }: Props) {
                     <Th>Data</Th>
                     <Th>Classificação</Th>
                     <Th>
-                        <Button onClick={onOpen}>Inserir</Button>
+                        <Button colorScheme='teal' onClick={onOpen}>Inserir</Button>
                     </Th>
                 </Tr>
             </Thead>
