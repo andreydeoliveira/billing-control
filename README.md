@@ -42,3 +42,6 @@ Push das alterações da tabela
 ```bash
 npx prisma db push
 ```
+
+
+Obs: Usar o arquivo de configuração como .env e não .env.local

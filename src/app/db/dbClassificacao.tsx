@@ -1,6 +1,5 @@
 'use server'
 
-import { Classificacao } from "@prisma/client";
 import prisma from "@/db/prisma"
 
 export async function deleteClassificacao(idRef: string) {
@@ -38,6 +37,6 @@ export async function updateClassificacao(idParam: any, nameParam: any, obsParam
     return getFullClassificacao();
 }
 
-export async function getFullClassificacao(): Promise<Classificacao[]> {
+export async function getFullClassificacao() {
     return await prisma.classificacao.findMany();
 }
