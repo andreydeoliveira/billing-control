@@ -44,5 +44,4 @@ npx prisma db push
 ```
 
 
-Componente de data
-https://www.react-lite-month-picker.dev/
+Obs: Usar o arquivo de configuração como .env e não .env.local

@@ -26,7 +26,7 @@ import {
     FiClock,
 } from "react-icons/fi";
 
-import { CiMoneyBill, CiCreditCard2, CiBoxList } from "react-icons/ci";
+import { CiMoneyBill, CiCreditCard2, CiBoxList, CiBank } from "react-icons/ci";
 
 import { IconType } from "react-icons";
 import { ReactText } from "react";
@@ -44,6 +44,7 @@ const LinkItems: Array<LinkItemProps> = [
         href: "/api/cadastros/classificacao",
     },
     { name: "Cartão", icon: CiCreditCard2, href: "/api/cadastros/cartao" },
+    { name: "Bancos", icon: CiBank, href: "/api/cadastros/bancos" },
     {
         name: "Lançamentos esperados",
         icon: FiClock,

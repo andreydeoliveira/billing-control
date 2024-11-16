@@ -39,3 +39,10 @@ model Cartao {
   datacriacao     DateTime @default(now())
   dataatualizacao DateTime @updatedAt
 }
+
+model ContaBancaria {
+  id             String   @id @default(uuid())
+  name           String
+  datacriacao    DateTime @default(now())
+  dataatualizacao DateTime @updatedAt
+}
