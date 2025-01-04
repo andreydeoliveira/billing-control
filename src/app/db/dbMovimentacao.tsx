@@ -28,10 +28,18 @@ export async function getFullMovimentacao({ year, month }: Props): Promise<Movim
             }
         },
         where: {
-            diaPagamento: {
+            dataPagamento: {
                 gte: new Date(Date.UTC(year, month - 1, 1)), // Ajustado para garantir UTC
                 lt: new Date(Date.UTC(year, month, 1)) // Ajustado para garantir UTC
             }
+        }
+    });
+}
+
+export async function deleteMovimentacao(idRef: string) {
+    await prisma.movimentacao.deleteMany({
+        where: {
+            id: idRef,
         }
     });
 }

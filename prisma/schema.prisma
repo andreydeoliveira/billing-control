@@ -57,7 +57,7 @@ model Movimentacao {
   contaDestino    Conta    @relation("ContaDestino", fields: [contaDestinoId], references: [id])
   valor           Float
   dataVencimento   DateTime
-  dataPago         DateTime
+  dataPagamento         DateTime
   datacriacao     DateTime @default(now())
   dataatualizacao DateTime @updatedAt
   observacao      String   @db.Text
