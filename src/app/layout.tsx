@@ -1,7 +1,16 @@
-"use client";
+import type { Metadata } from "next";
+import { ColorSchemeScript, MantineProvider } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
+import { UserProvider } from "@/contexts/UserContext";
+import "./globals.css";
+import "@mantine/core/styles.css";
+import "@mantine/dates/styles.css";
+import "@mantine/notifications/styles.css";
 
-import { ChakraProvider, Flex, Container } from "@chakra-ui/react";
-import NavBar from "./components/navbar/navbar";
+export const metadata: Metadata = {
+  title: "Billing Control",
+  description: "Controle financeiro pessoal e familiar",
+};
 
 export default function RootLayout({
   children,
@@ -9,15 +18,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>
-        <ChakraProvider>
-          {/*<Flex as="header" position="fixed" backgroundColor="rgba(255,  255, 255, 0.8)" backdropFilter="saturate(180%) blur(5px)"  w="100%">*/}
-          <NavBar>
-            {/*</Flex>}*/}
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head>
+        <ColorSchemeScript />
+      </head>
+      <body suppressHydrationWarning>
+        <MantineProvider>
+          <UserProvider>
+            <Notifications />
             {children}
-          </NavBar>
-        </ChakraProvider>
+          </UserProvider>
+        </MantineProvider>
       </body>
     </html>
   );

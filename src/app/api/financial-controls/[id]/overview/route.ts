@@ -1,0 +1,238 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/auth';
+import { db } from '@/db';
+import { 
+  bankAccounts, 
+  financialControlUsers, 
+  monthlyTransactions, 
+  cardInvoices,
+  transfers,
+  cards,
+  expenseIncomeAccounts
+} from '@/db/schema';
+import { eq, and, sql } from 'drizzle-orm';
+import dayjs from 'dayjs';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth();
+    
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+
+    const { id: controlId } = await params;
+    const currentMonth = dayjs().format('YYYY-MM');
+
+    // Verificar se o usuário tem acesso ao controle
+    const userAccess = await db
+      .select()
+      .from(financialControlUsers)
+      .where(
+        and(
+          eq(financialControlUsers.userId, session.user.id),
+          eq(financialControlUsers.financialControlId, controlId)
+        )
+      )
+      .limit(1);
+
+    if (userAccess.length === 0) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    // 1. Buscar contas com trackBalance = true para calcular saldo total
+    const accounts = await db
+      .select()
+      .from(bankAccounts)
+      .where(
+        and(
+          eq(bankAccounts.financialControlId, controlId),
+          eq(bankAccounts.trackBalance, true)
+        )
+      );
+
+    const startDate = new Date(`${currentMonth}-01`);
+    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+
+    let totalBalance = 0;
+
+    for (const account of accounts) {
+      const accountId = account.id;
+      
+      // Transações pagas
+      const transactions = await db
+        .select({
+          type: expenseIncomeAccounts.type,
+          actualAmount: monthlyTransactions.actualAmount,
+        })
+        .from(monthlyTransactions)
+        .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
+        .where(
+          and(
+            eq(monthlyTransactions.bankAccountId, accountId),
+            eq(monthlyTransactions.monthYear, currentMonth),
+            sql`${monthlyTransactions.paidDate} IS NOT NULL`
+          )
+        );
+
+      // Transferências de saída
+      const transfersOut = await db
+        .select({ amount: transfers.amount })
+        .from(transfers)
+        .where(
+          and(
+            eq(transfers.fromBankAccountId, accountId),
+            sql`${transfers.transferDate} >= ${startDate.toISOString()}`,
+            sql`${transfers.transferDate} <= ${endDate.toISOString()}`
+          )
+        );
+
+      // Transferências de entrada
+      const transfersIn = await db
+        .select({ amount: transfers.amount })
+        .from(transfers)
+        .where(
+          and(
+            eq(transfers.toBankAccountId, accountId),
+            sql`${transfers.transferDate} >= ${startDate.toISOString()}`,
+            sql`${transfers.transferDate} <= ${endDate.toISOString()}`
+          )
+        );
+
+      // Pagamentos de faturas
+      const invoicePayments = await db
+        .select({ totalAmount: cardInvoices.totalAmount })
+        .from(cardInvoices)
+        .where(
+          and(
+            eq(cardInvoices.bankAccountId, accountId),
+            eq(cardInvoices.isPaid, true),
+            sql`${cardInvoices.paidDate} >= ${startDate.toISOString()}`,
+            sql`${cardInvoices.paidDate} <= ${endDate.toISOString()}`
+          )
+        );
+
+      const initialBalance = parseFloat(account.initialBalance || '0');
+      
+      const income = transactions
+        .filter((t) => t.type === 'income')
+        .reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
+
+      const expenses = transactions
+        .filter((t) => t.type === 'expense')
+        .reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
+
+      const transfersInTotal = transfersIn.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      const transfersOutTotal = transfersOut.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      const invoicePaymentsTotal = invoicePayments.reduce((sum, i) => sum + parseFloat(i.totalAmount), 0);
+
+      const accountBalance = initialBalance + income - expenses + transfersInTotal - transfersOutTotal - invoicePaymentsTotal;
+      totalBalance += accountBalance;
+    }
+
+    // 2. Receitas do mês atual (todas as contas)
+    const monthlyIncomeTransactions = await db
+      .select({ actualAmount: monthlyTransactions.actualAmount })
+      .from(monthlyTransactions)
+      .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
+      .where(
+        and(
+          eq(expenseIncomeAccounts.type, 'income'),
+          eq(monthlyTransactions.monthYear, currentMonth),
+          sql`${monthlyTransactions.paidDate} IS NOT NULL`
+        )
+      );
+
+    const monthlyIncome = monthlyIncomeTransactions.reduce(
+      (sum, t) => sum + parseFloat(t.actualAmount || '0'),
+      0
+    );
+
+    // 3. Despesas do mês atual (todas as contas)
+    const monthlyExpenseTransactions = await db
+      .select({ actualAmount: monthlyTransactions.actualAmount })
+      .from(monthlyTransactions)
+      .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
+      .where(
+        and(
+          eq(expenseIncomeAccounts.type, 'expense'),
+          eq(monthlyTransactions.monthYear, currentMonth),
+          sql`${monthlyTransactions.paidDate} IS NOT NULL`
+        )
+      );
+
+    const monthlyExpenses = monthlyExpenseTransactions.reduce(
+      (sum, t) => sum + parseFloat(t.actualAmount || '0'),
+      0
+    );
+
+    // 4. Faturas em aberto do mês atual
+    const openInvoices = await db
+      .select({ totalAmount: cardInvoices.totalAmount })
+      .from(cardInvoices)
+      .where(
+        and(
+          eq(cardInvoices.isPaid, false),
+          sql`${cardInvoices.monthYear} = ${currentMonth}`
+        )
+      );
+
+    const creditCardDebt = openInvoices.reduce(
+      (sum, i) => sum + parseFloat(i.totalAmount),
+      0
+    );
+
+    // 5. Alertas: faturas vencendo nos próximos 7 dias
+    const today = dayjs();
+    const next7Days = today.add(7, 'day');
+
+    const upcomingInvoices = await db
+      .select({
+        id: cardInvoices.id,
+        cardName: cards.name,
+        totalAmount: cardInvoices.totalAmount,
+        dueDate: cardInvoices.dueDate,
+      })
+      .from(cardInvoices)
+      .leftJoin(cards, eq(cardInvoices.cardId, cards.id))
+      .where(
+        and(
+          eq(cardInvoices.isPaid, false),
+          sql`${cardInvoices.dueDate} >= ${today.toISOString()}`,
+          sql`${cardInvoices.dueDate} <= ${next7Days.toISOString()}`
+        )
+      );
+
+    // 6. Transações não pagas do mês
+    const unpaidTransactions = await db
+      .select({ id: monthlyTransactions.id })
+      .from(monthlyTransactions)
+      .where(
+        and(
+          eq(monthlyTransactions.monthYear, currentMonth),
+          sql`${monthlyTransactions.paidDate} IS NULL`
+        )
+      );
+
+    return NextResponse.json({
+      totalBalance,
+      monthlyIncome,
+      monthlyExpenses,
+      creditCardDebt,
+      alerts: {
+        upcomingInvoices: upcomingInvoices.length,
+        unpaidTransactions: unpaidTransactions.length,
+      },
+      upcomingInvoicesDetails: upcomingInvoices,
+    });
+  } catch (error) {
+    console.error('Erro ao buscar overview:', error);
+    return NextResponse.json(
+      { error: 'Erro ao buscar dados da visão geral' },
+      { status: 500 }
+    );
+  }
+}
