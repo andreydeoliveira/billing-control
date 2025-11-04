@@ -96,7 +96,7 @@ export async function GET(
           if (!isActive) return;
 
           let includeInAccount = false;
-          let actualAmount = amount;
+          const actualAmount = amount;
 
           // Se for desta conta bancária especificamente
           if (transaction.bankAccountId === account.id) {
@@ -107,23 +107,16 @@ export async function GET(
             }
             includeInAccount = true;
           }
-          // Se for de cartão (sem conta específica), considera nesta conta
-          else if (!transaction.bankAccountId && transaction.cardId) {
+          // Se for de cartão, só inclui na primeira conta (não dividir)
+          else if (transaction.cardId && accounts.indexOf(account) === 0) {
             if (transaction.type === 'expense') {
-              actualAmount = amount / accounts.length;
-              expectedExpenses += actualAmount;
+              expectedExpenses += amount;
               includeInAccount = true;
             }
           }
-          // Se não tem nem conta nem cartão, divide entre as contas
-          else if (!transaction.bankAccountId && !transaction.cardId) {
-            actualAmount = amount / accounts.length;
             if (transaction.type === 'income') {
               expectedIncome += actualAmount;
             } else {
-              expectedExpenses += actualAmount;
-            }
-            includeInAccount = true;
           }
 
           if (includeInAccount) {

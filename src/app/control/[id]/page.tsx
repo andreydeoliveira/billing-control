@@ -170,11 +170,27 @@ export default function ControlPage() {
           </Text>
 
           <NavLink
+            label="Visão Geral"
+            leftSection={<IconHome size="1.2rem" />}
+            active={activeView === 'overview'}
+            onClick={() => setActiveView('overview')}
+            description="Dashboard principal"
+          />
+
+          <NavLink
             label="Visão Mensal"
             leftSection={<IconCalendarMonth size="1.2rem" />}
             active={activeView === 'monthly'}
             onClick={() => setActiveView('monthly')}
             description="Lançamentos do mês"
+          />
+
+          <NavLink
+            label="Projeção Financeira"
+            leftSection={<IconChartLine size="1.2rem" />}
+            active={activeView === 'projection'}
+            onClick={() => setActiveView('projection')}
+            description="Projeção próximos meses"
           />
 
           <NavLink
@@ -207,22 +223,6 @@ export default function ControlPage() {
             active={activeView === 'provisioned'}
             onClick={() => setActiveView('provisioned')}
             description="Despesas recorrentes"
-          />
-
-          <NavLink
-            label="Visão Geral"
-            leftSection={<IconHome size="1.2rem" />}
-            active={activeView === 'overview'}
-            onClick={() => setActiveView('overview')}
-            description="Dashboard principal"
-          />
-
-          <NavLink
-            label="Projeção Financeira"
-            leftSection={<IconChartLine size="1.2rem" />}
-            active={activeView === 'projection'}
-            onClick={() => setActiveView('projection')}
-            description="Projeção próximos meses"
           />
         </AppShell.Section>
 

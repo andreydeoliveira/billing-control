@@ -75,6 +75,19 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
   const [modalOpened, setModalOpened] = useState(false);
   const [editModalOpened, setEditModalOpened] = useState(false);
   const [quickAccountModalOpened, setQuickAccountModalOpened] = useState(false);
+  const [deleteModalOpened, setDeleteModalOpened] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
+  const [deleteInfo, setDeleteInfo] = useState<{
+    hasRelatedTransactions: boolean;
+    totalTransactions: number;
+    paidTransactions: number;
+    unpaidTransactions: number;
+  } | null>(null);
+  const [deleteStrategy, setDeleteStrategy] = useState<'all' | 'unpaid' | 'period'>('unpaid');
+  const [deletePeriod, setDeletePeriod] = useState({
+    startMonth: '',
+    endMonth: '',
+  });
   const [selectedTransaction, setSelectedTransaction] = useState<ProvisionedTransaction | null>(null);
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -317,13 +330,53 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir este gasto provisionado?')) {
-      return;
-    }
-
+    // Primeiro, verificar se tem transações vinculadas
     setPageLoading(true);
     try {
-      const response = await fetch(`/api/financial-controls/${controlId}/provisioned-transactions/${id}`, {
+      const response = await fetch(
+        `/api/financial-controls/${controlId}/provisioned-transactions/${id}?strategy=check`
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.hasRelatedTransactions) {
+          // Tem transações vinculadas, abrir modal de opções
+          setTransactionToDelete(id);
+          setDeleteInfo(data);
+          setDeleteStrategy('unpaid'); // padrão: apenas não pagas
+          setDeleteModalOpened(true);
+        } else {
+          // Não tem transações vinculadas, deletar direto
+          await confirmDelete(id, null);
+        }
+      } else {
+        throw new Error('Erro ao verificar transações');
+      }
+    } catch {
+      notifications.show({
+        title: 'Erro',
+        message: 'Não foi possível verificar as transações vinculadas',
+        color: 'red',
+      });
+    } finally {
+      setPageLoading(false);
+    }
+  };
+
+  const confirmDelete = async (id: string, strategy: 'all' | 'unpaid' | 'period' | null) => {
+    setLoading(true);
+    try {
+      let url = `/api/financial-controls/${controlId}/provisioned-transactions/${id}`;
+      
+      if (strategy) {
+        url += `?strategy=${strategy}`;
+        if (strategy === 'period') {
+          url += `&startMonth=${deletePeriod.startMonth}&endMonth=${deletePeriod.endMonth}`;
+        }
+      }
+
+      const response = await fetch(url, {
         method: 'DELETE',
       });
 
@@ -333,6 +386,9 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           message: 'Provisionado excluído',
           color: 'green',
         });
+        setDeleteModalOpened(false);
+        setTransactionToDelete(null);
+        setDeleteInfo(null);
         loadTransactions();
       } else {
         throw new Error('Erro ao excluir');
@@ -344,7 +400,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
         color: 'red',
       });
     } finally {
-      setPageLoading(false);
+      setLoading(false);
     }
   };
 
@@ -864,6 +920,93 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           <Button fullWidth onClick={handleQuickAccountCreate} loading={loading}>
             Criar e Selecionar
           </Button>
+        </Stack>
+      </Modal>
+
+      {/* Modal de Exclusão */}
+      <Modal
+        opened={deleteModalOpened}
+        onClose={() => {
+          setDeleteModalOpened(false);
+          setTransactionToDelete(null);
+          setDeleteInfo(null);
+        }}
+        title="Excluir Gasto Provisionado"
+        size="lg"
+      >
+        <Stack gap="md">
+          {deleteInfo && (
+            <>
+              <Text size="sm">
+                Este gasto provisionado tem <strong>{deleteInfo.totalTransactions} transações mensais</strong> vinculadas:
+              </Text>
+              
+              <Paper withBorder p="sm" bg="gray.0">
+                <Stack gap="xs">
+                  <Group justify="space-between">
+                    <Text size="sm" c="green">Transações pagas:</Text>
+                    <Badge color="green">{deleteInfo.paidTransactions}</Badge>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text size="sm" c="orange">Transações não pagas:</Text>
+                    <Badge color="orange">{deleteInfo.unpaidTransactions}</Badge>
+                  </Group>
+                </Stack>
+              </Paper>
+
+              <Text size="sm" fw={500} mt="md">
+                O que deseja fazer?
+              </Text>
+
+              <Select
+                label="Estratégia de exclusão"
+                value={deleteStrategy}
+                onChange={(value) => setDeleteStrategy(value as 'all' | 'unpaid' | 'period')}
+                data={[
+                  { value: 'unpaid', label: 'Remover apenas transações não pagas' },
+                  { value: 'all', label: 'Remover TODAS as transações (incluindo pagas)' },
+                  { value: 'period', label: 'Remover transações de um período específico' },
+                ]}
+              />
+
+              {deleteStrategy === 'period' && (
+                <Group grow>
+                  <TextInput
+                    label="Mês inicial"
+                    placeholder="2025-01"
+                    value={deletePeriod.startMonth}
+                    onChange={(e) => setDeletePeriod({ ...deletePeriod, startMonth: e.target.value })}
+                  />
+                  <TextInput
+                    label="Mês final"
+                    placeholder="2025-12"
+                    value={deletePeriod.endMonth}
+                    onChange={(e) => setDeletePeriod({ ...deletePeriod, endMonth: e.target.value })}
+                  />
+                </Group>
+              )}
+
+              <Group justify="space-between" mt="md">
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setDeleteModalOpened(false);
+                    setTransactionToDelete(null);
+                    setDeleteInfo(null);
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  color="red"
+                  loading={loading}
+                  onClick={() => transactionToDelete && confirmDelete(transactionToDelete, deleteStrategy)}
+                >
+                  Confirmar Exclusão
+                </Button>
+              </Group>
+            </>
+          )}
         </Stack>
       </Modal>
     </div>

@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server';
 
 export async function proxy(req: NextRequest) {
   const session = await auth();
-  const isLoggedIn = !!session;
+  const isLoggedIn = !!session?.user;
   const isAuthPage = req.nextUrl.pathname.startsWith('/auth');
   const isApiAuthRoute = req.nextUrl.pathname.startsWith('/api/auth');
 

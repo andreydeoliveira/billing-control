@@ -11,9 +11,11 @@ import {
   Button,
   Stack,
   Select,
+  ActionIcon,
+  NumberInput,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
-import { IconCreditCard } from '@tabler/icons-react';
+import { IconCreditCard, IconEdit } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
 
@@ -62,6 +64,12 @@ export function InvoiceDetails({
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editModalOpened, setEditModalOpened] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [editForm, setEditForm] = useState({
+    actualAmount: '',
+    paidDate: null as Date | null,
+  });
   const [paymentForm, setPaymentForm] = useState({
     bankAccountId: '',
     paidDate: new Date(),
@@ -142,6 +150,56 @@ export function InvoiceDetails({
     }
   };
 
+  const openEditModal = (transaction: Transaction) => {
+    setSelectedTransaction(transaction);
+    setEditForm({
+      actualAmount: transaction.actualAmount || transaction.expectedAmount,
+      paidDate: transaction.paidDate ? new Date(transaction.paidDate) : null,
+    });
+    setEditModalOpened(true);
+  };
+
+  const handleUpdateTransaction = async () => {
+    if (!selectedTransaction) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/financial-controls/${controlId}/monthly-transactions/${selectedTransaction.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            actualAmount: editForm.actualAmount,
+            paidDate: editForm.paidDate ? dayjs(editForm.paidDate).format('YYYY-MM-DD') : null,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        notifications.show({
+          title: 'Sucesso',
+          message: 'Transação atualizada',
+          color: 'green',
+        });
+        setEditModalOpened(false);
+        setSelectedTransaction(null);
+        loadTransactions();
+        onUpdate(); // Atualizar total da fatura
+      } else {
+        throw new Error('Erro ao atualizar');
+      }
+    } catch {
+      notifications.show({
+        title: 'Erro',
+        message: 'Não foi possível atualizar a transação',
+        color: 'red',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Modal
       opened={opened}
@@ -194,12 +252,13 @@ export function InvoiceDetails({
                 <Table.Th>Tipo</Table.Th>
                 <Table.Th>Parcela</Table.Th>
                 <Table.Th>Valor</Table.Th>
+                <Table.Th style={{ width: 80 }}>Ações</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {transactions.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={4} style={{ textAlign: 'center', padding: 32 }}>
+                  <Table.Td colSpan={5} style={{ textAlign: 'center', padding: 32 }}>
                     <Text c="dimmed">Nenhuma transação nesta fatura</Text>
                   </Table.Td>
                 </Table.Tr>
@@ -223,8 +282,17 @@ export function InvoiceDetails({
                     </Table.Td>
                     <Table.Td>
                       <Text fw={500} c="red">
-                        R$ {parseFloat(transaction.expectedAmount).toFixed(2)}
+                        R$ {parseFloat(transaction.actualAmount || transaction.expectedAmount).toFixed(2)}
                       </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <ActionIcon
+                        variant="subtle"
+                        color="blue"
+                        onClick={() => openEditModal(transaction)}
+                      >
+                        <IconEdit size={16} />
+                      </ActionIcon>
                     </Table.Td>
                   </Table.Tr>
                 ))
@@ -265,6 +333,53 @@ export function InvoiceDetails({
           </div>
         )}
       </Stack>
+
+      {/* Modal de Edição de Transação */}
+      <Modal
+        opened={editModalOpened}
+        onClose={() => {
+          setEditModalOpened(false);
+          setSelectedTransaction(null);
+        }}
+        title="Editar Transação"
+      >
+        <Stack>
+          {selectedTransaction && (
+            <>
+              <Text size="sm" c="dimmed">
+                Editando: <strong>{selectedTransaction.name}</strong>
+              </Text>
+              
+              <NumberInput
+                label="Valor Real"
+                value={editForm.actualAmount}
+                onChange={(value) => setEditForm({ ...editForm, actualAmount: value?.toString() || '' })}
+                prefix="R$ "
+                decimalScale={2}
+                fixedDecimalScale
+                required
+              />
+
+              <DateInput
+                label="Data de Pagamento"
+                value={editForm.paidDate}
+                onChange={(value) => setEditForm({ ...editForm, paidDate: value })}
+                valueFormat="DD/MM/YYYY"
+                clearable
+              />
+
+              <Group justify="space-between">
+                <Button variant="default" onClick={() => setEditModalOpened(false)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleUpdateTransaction} loading={loading}>
+                  Salvar
+                </Button>
+              </Group>
+            </>
+          )}
+        </Stack>
+      </Modal>
     </Modal>
   );
 }

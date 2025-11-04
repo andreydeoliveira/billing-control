@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       if (error instanceof AuthError) {
         return NextResponse.json(
-          { error: 'Email ou senha inválidos' },
+          { error: 'Credenciais inválidas' },
           { status: 401 }
         );
       }

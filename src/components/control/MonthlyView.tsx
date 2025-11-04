@@ -787,7 +787,18 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
                     .map((transaction) => (
                       <Table.Tr 
                         key={transaction.id}
-                        onDoubleClick={() => openEditModal(transaction)}
+                        onDoubleClick={() => {
+                          // Se for transação de cartão, abrir a fatura
+                          if (transaction.paymentMethod === 'credit_card' && transaction.cardName) {
+                            const invoice = cardInvoices.find(inv => inv.cardName === transaction.cardName);
+                            if (invoice) {
+                              setSelectedInvoice(invoice);
+                              setInvoiceDetailsOpened(true);
+                            }
+                          } else {
+                            openEditModal(transaction);
+                          }
+                        }}
                         style={{ cursor: 'pointer' }}
                       >
                         <Table.Td>
@@ -795,7 +806,17 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
                             ? dayjs(transaction.paidDate).format('DD/MM/YYYY')
                             : '-'}
                         </Table.Td>
-                        <Table.Td>{transaction.name}</Table.Td>
+                        <Table.Td>
+                          {/* Se for cartão, mostrar nome do cartão ao invés do nome da conta */}
+                          {transaction.paymentMethod === 'credit_card' && transaction.cardName ? (
+                            <Group gap="xs">
+                              <IconCreditCard size={16} />
+                              <Text>{transaction.cardName}</Text>
+                            </Group>
+                          ) : (
+                            transaction.name
+                          )}
+                        </Table.Td>
                         <Table.Td>
                           <Badge color={transaction.type === 'income' ? 'green' : 'red'} variant="light">
                             {transaction.type === 'income' ? 'Receita' : 'Despesa'}
@@ -943,7 +964,12 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         {/* ABA: Faturas de Cartão */}
         <Tabs.Panel value="invoices">
           <Paper shadow="xs" p="md">
-            <Text fw={500} mb="md">Faturas de Cartão de Crédito</Text>
+            <Group justify="space-between" mb="md">
+              <div>
+                <Text fw={500}>Faturas de Cartão de Crédito</Text>
+                <Text size="xs" c="dimmed">Clique duplo para ver os detalhes e confirmar valores</Text>
+              </div>
+            </Group>
 
             <Table striped highlightOnHover>
               <Table.Thead>
@@ -976,7 +1002,14 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
                   </Table.Tr>
                 ) : (
                   cardInvoices.map((invoice) => (
-                    <Table.Tr key={invoice.id}>
+                    <Table.Tr 
+                      key={invoice.id}
+                      onDoubleClick={() => {
+                        setSelectedInvoice(invoice);
+                        setInvoiceDetailsOpened(true);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
                       <Table.Td>
                         <Group gap="xs">
                           <IconCreditCard size={16} />
@@ -1005,7 +1038,8 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
                         <Button 
                           size="xs" 
                           variant="light"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setSelectedInvoice(invoice);
                             setInvoiceDetailsOpened(true);
                           }}

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { db } from '@/db';
-import { provisionedTransactions, financialControlUsers, bankAccounts, cards, expenseIncomeAccounts } from '@/db/schema';
+import { provisionedTransactions, financialControlUsers, bankAccounts, cards, expenseIncomeAccounts, monthlyTransactions } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
+import dayjs from 'dayjs';
 
 export async function GET(
   request: NextRequest,
@@ -129,6 +130,62 @@ export async function POST(
         startDate: body.startDate || null,
       })
       .returning();
+
+    // Gerar automaticamente as transações mensais
+    if (body.isRecurring && body.startDate) {
+      // Recorrente: gerar para o ano inteiro (12 meses)
+      const monthlyTransactionsToInsert = [];
+      const startDate = dayjs(body.startDate);
+      
+      for (let i = 0; i < 12; i++) {
+        const monthDate = startDate.add(i, 'month');
+        const monthYear = monthDate.format('YYYY-MM');
+        
+        monthlyTransactionsToInsert.push({
+          financialControlId: controlId,
+          provisionedTransactionId: provisioned.id,
+          accountId: body.accountId,
+          observation: body.observation || null,
+          expectedAmount: body.expectedAmount,
+          actualAmount: null,
+          monthYear: monthYear,
+          paidDate: null,
+          paymentMethod: body.cardId ? 'credit_card' : 'bank_account',
+          bankAccountId: body.bankAccountId || null,
+          cardId: body.cardId || null,
+          installmentNumber: null, // Recorrente não tem parcela
+          totalInstallments: null,
+        });
+      }
+      
+      await db.insert(monthlyTransactions).values(monthlyTransactionsToInsert);
+    } else if (body.installments && body.installments > 0 && body.startDate) {
+      // Parcelado: gerar conforme as parcelas
+      const monthlyTransactionsToInsert = [];
+      
+      for (let i = 0; i < body.installments; i++) {
+        const monthDate = dayjs(body.startDate).add(i, 'month');
+        const monthYear = monthDate.format('YYYY-MM');
+        
+        monthlyTransactionsToInsert.push({
+          financialControlId: controlId,
+          provisionedTransactionId: provisioned.id,
+          accountId: body.accountId,
+          observation: body.observation || null,
+          expectedAmount: body.expectedAmount,
+          actualAmount: null,
+          monthYear: monthYear,
+          paidDate: null,
+          paymentMethod: body.cardId ? 'credit_card' : 'bank_account',
+          bankAccountId: body.bankAccountId || null,
+          cardId: body.cardId || null,
+          installmentNumber: i + 1,
+          totalInstallments: body.installments,
+        });
+      }
+      
+      await db.insert(monthlyTransactions).values(monthlyTransactionsToInsert);
+    }
 
     return NextResponse.json(provisioned, { status: 201 });
   } catch (error) {
