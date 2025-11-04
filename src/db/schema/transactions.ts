@@ -23,6 +23,7 @@ export const provisionedTransactions = pgTable('provisioned_transactions', {
   
   // Recorrência
   isRecurring: boolean('is_recurring').notNull().default(false),
+  recurrenceType: text('recurrence_type'), // 'monthly' | 'yearly' (só para recorrentes)
   installments: integer('installments'), // número de parcelas (null se não for parcelado)
   currentInstallment: integer('current_installment').default(1), // parcela atual
   startDate: date('start_date'), // data de início das parcelas (quando não é recorrente)

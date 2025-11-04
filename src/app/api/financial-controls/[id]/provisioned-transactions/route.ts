@@ -125,6 +125,7 @@ export async function POST(
         bankAccountId: body.bankAccountId || null,
         cardId: body.cardId || null,
         isRecurring: body.isRecurring,
+        recurrenceType: body.recurrenceType || 'monthly', // 'monthly' ou 'yearly'
         installments: body.installments,
         currentInstallment: 1,
         startDate: body.startDate || null,
@@ -133,29 +134,55 @@ export async function POST(
 
     // Gerar automaticamente as transações mensais
     if (body.isRecurring && body.startDate) {
-      // Recorrente: gerar para o ano inteiro (12 meses)
+      // Recorrente: gerar conforme o tipo (mensal ou anual)
       const monthlyTransactionsToInsert = [];
       const startDate = dayjs(body.startDate);
+      const recurrenceType = body.recurrenceType || 'monthly';
       
-      for (let i = 0; i < 12; i++) {
-        const monthDate = startDate.add(i, 'month');
-        const monthYear = monthDate.format('YYYY-MM');
-        
-        monthlyTransactionsToInsert.push({
-          financialControlId: controlId,
-          provisionedTransactionId: provisioned.id,
-          accountId: body.accountId,
-          observation: body.observation || null,
-          expectedAmount: body.expectedAmount,
-          actualAmount: null,
-          monthYear: monthYear,
-          paidDate: null,
-          paymentMethod: body.cardId ? 'credit_card' : 'bank_account',
-          bankAccountId: body.bankAccountId || null,
-          cardId: body.cardId || null,
-          installmentNumber: null, // Recorrente não tem parcela
-          totalInstallments: null,
-        });
+      if (recurrenceType === 'monthly') {
+        // Mensal: gerar 12 meses
+        for (let i = 0; i < 12; i++) {
+          const monthDate = startDate.add(i, 'month');
+          const monthYear = monthDate.format('YYYY-MM');
+          
+          monthlyTransactionsToInsert.push({
+            financialControlId: controlId,
+            provisionedTransactionId: provisioned.id,
+            accountId: body.accountId,
+            observation: body.observation || null,
+            expectedAmount: body.expectedAmount,
+            actualAmount: null,
+            monthYear: monthYear,
+            paidDate: null,
+            paymentMethod: body.cardId ? 'credit_card' : 'bank_account',
+            bankAccountId: body.bankAccountId || null,
+            cardId: body.cardId || null,
+            installmentNumber: null, // Recorrente não tem parcela
+            totalInstallments: null,
+          });
+        }
+      } else if (recurrenceType === 'yearly') {
+        // Anual: gerar para os próximos 3 anos (mesmo mês de cada ano)
+        for (let i = 0; i < 3; i++) {
+          const yearDate = startDate.add(i, 'year');
+          const monthYear = yearDate.format('YYYY-MM');
+          
+          monthlyTransactionsToInsert.push({
+            financialControlId: controlId,
+            provisionedTransactionId: provisioned.id,
+            accountId: body.accountId,
+            observation: body.observation || null,
+            expectedAmount: body.expectedAmount,
+            actualAmount: null,
+            monthYear: monthYear,
+            paidDate: null,
+            paymentMethod: body.cardId ? 'credit_card' : 'bank_account',
+            bankAccountId: body.bankAccountId || null,
+            cardId: body.cardId || null,
+            installmentNumber: null,
+            totalInstallments: null,
+          });
+        }
       }
       
       await db.insert(monthlyTransactions).values(monthlyTransactionsToInsert);

@@ -34,6 +34,7 @@ interface ProvisionedTransaction {
   bankAccountName?: string;
   cardName?: string;
   isRecurring: boolean;
+  recurrenceType?: string | null;
   installments: number | null;
   currentInstallment: number;
   accountId: string;
@@ -88,6 +89,8 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     startMonth: '',
     endMonth: '',
   });
+  const [generateFutureModalOpened, setGenerateFutureModalOpened] = useState(false);
+  const [targetYear, setTargetYear] = useState<string>('2027');
   const [selectedTransaction, setSelectedTransaction] = useState<ProvisionedTransaction | null>(null);
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
@@ -99,6 +102,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     bankAccountId: '',
     cardId: '',
     isRecurring: true,
+    recurrenceType: 'monthly', // 'monthly' ou 'yearly'
     installments: '',
     startDate: null as Date | null,
   });
@@ -110,6 +114,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     bankAccountId: '',
     cardId: '',
     isRecurring: true,
+    recurrenceType: 'monthly',
     installments: '',
     startDate: null as Date | null,
   });
@@ -291,6 +296,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           bankAccountId: formData.paymentSource === 'bank_account' ? formData.bankAccountId : null,
           cardId: formData.paymentSource === 'card' ? formData.cardId : null,
           isRecurring: formData.isRecurring,
+          recurrenceType: formData.isRecurring ? formData.recurrenceType : null,
           installments: formData.installments ? parseInt(formData.installments) : null,
           startDate: formData.startDate ? formData.startDate.toISOString().split('T')[0] : null,
         }),
@@ -311,6 +317,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           bankAccountId: '',
           cardId: '',
           isRecurring: true,
+          recurrenceType: 'monthly',
           installments: '',
           startDate: null,
         });
@@ -414,6 +421,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       bankAccountId: transaction.bankAccountId || '',
       cardId: transaction.cardId || '',
       isRecurring: transaction.isRecurring,
+      recurrenceType: transaction.recurrenceType || 'monthly',
       installments: transaction.installments ? String(transaction.installments) : '',
       startDate: transaction.startDate ? new Date(transaction.startDate) : null,
     });
@@ -464,6 +472,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             bankAccountId: editFormData.paymentSource === 'bank_account' ? editFormData.bankAccountId : null,
             cardId: editFormData.paymentSource === 'card' ? editFormData.cardId : null,
             isRecurring: editFormData.isRecurring,
+            recurrenceType: editFormData.isRecurring ? editFormData.recurrenceType : null,
             installments: editFormData.installments ? parseInt(editFormData.installments) : null,
             startDate: editFormData.startDate ? editFormData.startDate.toISOString().split('T')[0] : null,
           }),
@@ -503,6 +512,49 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     return '-';
   };
 
+  const handleGenerateFuture = async () => {
+    if (!targetYear || parseInt(targetYear) < 2025) {
+      notifications.show({
+        title: 'Erro',
+        message: 'Informe um ano válido (2025 ou posterior)',
+        color: 'red',
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/financial-controls/${controlId}/provisioned-transactions/generate-future`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upToYear: parseInt(targetYear) }),
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        notifications.show({
+          title: 'Sucesso',
+          message: data.message,
+          color: 'green',
+        });
+        setGenerateFutureModalOpened(false);
+      } else {
+        throw new Error();
+      }
+    } catch {
+      notifications.show({
+        title: 'Erro',
+        message: 'Não foi possível gerar as transações futuras',
+        color: 'red',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div>
       <Group justify="space-between" mb="xl">
@@ -512,9 +564,17 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             Despesas e receitas recorrentes
           </Text>
         </div>
-        <Button leftSection={<IconPlus size={16} />} onClick={() => setModalOpened(true)}>
-          Novo Provisionado
-        </Button>
+        <Group>
+          <Button 
+            variant="light" 
+            onClick={() => setGenerateFutureModalOpened(true)}
+          >
+            Gerar Previsões Futuras
+          </Button>
+          <Button leftSection={<IconPlus size={16} />} onClick={() => setModalOpened(true)}>
+            Novo Provisionado
+          </Button>
+        </Group>
       </Group>
 
       <Paper shadow="xs" p="md">
@@ -625,6 +685,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             bankAccountId: '',
             cardId: '',
             isRecurring: false,
+            recurrenceType: 'monthly',
             installments: '',
             startDate: null,
           });
@@ -716,10 +777,42 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           )}
 
           <Switch
-            label="Recorrente (mensalmente)"
+            label="Recorrente"
             checked={formData.isRecurring}
             onChange={(e) => setFormData({ ...formData, isRecurring: e.currentTarget.checked, installments: '', startDate: null })}
           />
+
+          {formData.isRecurring && (
+            <>
+              <Select
+                label="Tipo de Recorrência"
+                placeholder="Selecione"
+                data={[
+                  { value: 'monthly', label: 'Mensal (todo mês - ex: Netflix, Luz)' },
+                  { value: 'yearly', label: 'Anual (todo ano - ex: Seguro do carro)' },
+                ]}
+                value={formData.recurrenceType}
+                onChange={(value) => setFormData({ ...formData, recurrenceType: value || 'monthly' })}
+                required
+              />
+
+              <DateInput
+                label="Data de Início"
+                placeholder="Selecione a data"
+                value={formData.startDate}
+                onChange={(value) => setFormData({ ...formData, startDate: value })}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                required
+              />
+
+              <Text size="xs" c="dimmed">
+                {formData.recurrenceType === 'monthly' 
+                  ? 'Transações mensais serão geradas automaticamente (12 meses inicialmente)'
+                  : 'Transações anuais serão geradas automaticamente (3 anos inicialmente)'}
+              </Text>
+            </>
+          )}
 
           {!formData.isRecurring && (
             <>
@@ -741,12 +834,6 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 clearable
               />
             </>
-          )}
-
-          {formData.isRecurring && (
-            <Text size="xs" c="dimmed">
-              Transações recorrentes são geradas automaticamente todo mês
-            </Text>
           )}
 
           <Button fullWidth onClick={handleSubmit} loading={loading}>
@@ -839,10 +926,42 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           )}
 
           <Switch
-            label="Recorrente (mensalmente)"
+            label="Recorrente"
             checked={editFormData.isRecurring}
             onChange={(e) => setEditFormData({ ...editFormData, isRecurring: e.currentTarget.checked, installments: '', startDate: null })}
           />
+
+          {editFormData.isRecurring && (
+            <>
+              <Select
+                label="Tipo de Recorrência"
+                placeholder="Selecione"
+                data={[
+                  { value: 'monthly', label: 'Mensal (todo mês - ex: Netflix, Luz)' },
+                  { value: 'yearly', label: 'Anual (todo ano - ex: Seguro do carro)' },
+                ]}
+                value={editFormData.recurrenceType}
+                onChange={(value) => setEditFormData({ ...editFormData, recurrenceType: value || 'monthly' })}
+                required
+              />
+
+              <DateInput
+                label="Data de Início"
+                placeholder="Selecione a data"
+                value={editFormData.startDate}
+                onChange={(value) => setEditFormData({ ...editFormData, startDate: value })}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                required
+              />
+
+              <Text size="xs" c="dimmed">
+                {editFormData.recurrenceType === 'monthly' 
+                  ? 'Transações mensais serão geradas automaticamente (12 meses inicialmente)'
+                  : 'Transações anuais serão geradas automaticamente (3 anos inicialmente)'}
+              </Text>
+            </>
+          )}
 
           {!editFormData.isRecurring && (
             <>
@@ -864,12 +983,6 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 clearable
               />
             </>
-          )}
-
-          {editFormData.isRecurring && (
-            <Text size="xs" c="dimmed">
-              Transações recorrentes são geradas automaticamente todo mês
-            </Text>
           )}
 
           <Button fullWidth onClick={handleEdit} loading={loading}>
@@ -1007,6 +1120,49 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
               </Group>
             </>
           )}
+        </Stack>
+      </Modal>
+
+      {/* Modal para Gerar Previsões Futuras */}
+      <Modal
+        opened={generateFutureModalOpened}
+        onClose={() => setGenerateFutureModalOpened(false)}
+        title="Gerar Previsões Futuras"
+        size="md"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Este recurso gera transações futuras para todos os gastos provisionados recorrentes (mensal ou anual).
+          </Text>
+          
+          <NumberInput
+            label="Gerar até o ano"
+            placeholder="Ex: 2027"
+            value={targetYear}
+            onChange={(value) => setTargetYear(String(value))}
+            min={2025}
+            max={2099}
+            required
+            description="Todas as transações recorrentes serão geradas até dezembro do ano informado"
+          />
+
+          <Paper withBorder p="sm" bg="blue.0">
+            <Text size="sm" fw={500} mb={4}>💡 Como funciona:</Text>
+            <Text size="xs" c="dimmed">
+              • <strong>Recorrentes mensais</strong> (Netflix, Spotify): Gera 1 transação por mês<br />
+              • <strong>Recorrentes anuais</strong> (Seguro do carro): Gera 1 transação por ano<br />
+              • Não duplica transações já existentes
+            </Text>
+          </Paper>
+
+          <Group justify="flex-end">
+            <Button variant="light" onClick={() => setGenerateFutureModalOpened(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleGenerateFuture} loading={loading}>
+              Gerar Transações
+            </Button>
+          </Group>
         </Stack>
       </Modal>
     </div>
