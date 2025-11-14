@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ColorSchemeScript, MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
+import { ModalsProvider } from "@mantine/modals";
 import { UserProvider } from "@/contexts/UserContext";
 import "./globals.css";
 import "@mantine/core/styles.css";
@@ -24,10 +25,12 @@ export default function RootLayout({
       </head>
       <body suppressHydrationWarning>
         <MantineProvider>
-          <UserProvider>
-            <Notifications />
-            {children}
-          </UserProvider>
+          <ModalsProvider>
+            <UserProvider>
+              <Notifications />
+              {children}
+            </UserProvider>
+          </ModalsProvider>
         </MantineProvider>
       </body>
     </html>

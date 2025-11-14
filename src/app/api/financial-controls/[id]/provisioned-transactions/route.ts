@@ -48,6 +48,7 @@ export async function GET(
         installments: provisionedTransactions.installments,
         currentInstallment: provisionedTransactions.currentInstallment,
         startDate: provisionedTransactions.startDate,
+        endDate: provisionedTransactions.endDate,
         createdAt: provisionedTransactions.createdAt,
         bankAccountName: bankAccounts.name,
         cardName: cards.name,
@@ -99,20 +100,15 @@ export async function POST(
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
-    // Validar que tem conta OU cartão (não ambos, não nenhum)
-    if (!body.bankAccountId && !body.cardId) {
-      return NextResponse.json(
-        { error: 'Informe uma conta bancária ou cartão' },
-        { status: 400 }
-      );
-    }
-
+    // Validar campos obrigatórios
     if (!body.accountId) {
       return NextResponse.json(
         { error: 'Selecione uma conta (ex: Luz, Água, Uber)' },
         { status: 400 }
       );
     }
+
+    // Forma de pagamento é opcional (pode ser "conta a pagar")
 
     // Criar provisionado
     const [provisioned] = await db
@@ -129,6 +125,7 @@ export async function POST(
         installments: body.installments,
         currentInstallment: 1,
         startDate: body.startDate || null,
+        endDate: body.endDate || null,
       })
       .returning();
 

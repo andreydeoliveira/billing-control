@@ -50,6 +50,10 @@ export async function POST(
       .from(provisionedTransactions)
       .where(eq(provisionedTransactions.financialControlId, controlId));
 
+    console.log('=== GENERATE MONTHLY DEBUG ===');
+    console.log('Total provisioned transactions:', provisioned.length);
+    console.log('Target month:', monthYear);
+
     const createdTransactions = [];
     const updatedInvoices = new Map<string, number>(); // cardId -> totalAmount
 
@@ -58,6 +62,17 @@ export async function POST(
 
     for (const prov of provisioned) {
       let shouldCreateTransaction = false;
+
+      console.log('Processing provisioned:', {
+        id: prov.id,
+        accountId: prov.accountId,
+        isRecurring: prov.isRecurring,
+        installments: prov.installments,
+        currentInstallment: prov.currentInstallment,
+        startDate: prov.startDate,
+        cardId: prov.cardId,
+        bankAccountId: prov.bankAccountId,
+      });
 
       // Verificar se deve criar transação
       if (prov.isRecurring) {
@@ -78,7 +93,22 @@ export async function POST(
             shouldCreateTransaction = false;
           }
         }
+      } else {
+        // Não recorrente e sem parcelas: criar apenas uma vez
+        // Verificar se startDate está no mês alvo ou antes
+        if (prov.startDate) {
+          const startDate = new Date(prov.startDate);
+          const startYear = startDate.getFullYear();
+          const startMonth = startDate.getMonth() + 1; // getMonth() retorna 0-11
+          
+          // Criar se o mês alvo for o mesmo do startDate
+          if (targetYear === startYear && targetMonth === startMonth) {
+            shouldCreateTransaction = true;
+          }
+        }
       }
+
+      console.log('Should create transaction:', shouldCreateTransaction);
 
       if (shouldCreateTransaction) {
         // Verificar se já existe transação deste provisionado neste mês
@@ -98,6 +128,8 @@ export async function POST(
           let paymentMethod = 'bank_account';
           if (prov.cardId) {
             paymentMethod = 'credit_card';
+          } else if (!prov.cardId && !prov.bankAccountId) {
+            paymentMethod = 'none'; // Conta a pagar
           }
 
           // Criar transação mensal
@@ -143,6 +175,9 @@ export async function POST(
         }
       }
     }
+
+    console.log('Created transactions:', createdTransactions.length);
+    console.log('Updated invoices map:', Object.fromEntries(updatedInvoices));
 
     // Criar/Atualizar faturas de cartão
     for (const [cardId, totalAmount] of updatedInvoices.entries()) {

@@ -109,12 +109,12 @@ export async function POST(
     const body = await request.json();
 
     // Validações
-    if (!body.name || !body.type || !body.expectedAmount || !body.paymentMethod || !body.monthYear) {
-      return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 });
-    }
-
     if (!body.accountId) {
       return NextResponse.json({ error: 'Selecione uma conta (ex: Luz, Água, Uber)' }, { status: 400 });
+    }
+
+    if (!body.expectedAmount || !body.paymentMethod || !body.monthYear) {
+      return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 });
     }
 
     if (body.paymentMethod === 'bank_account' && !body.bankAccountId) {

@@ -12,7 +12,6 @@ import {
   Modal,
   Group,
   Select,
-  ColorInput,
   Textarea,
   Badge,
   ActionIcon,
@@ -27,7 +26,6 @@ interface Account {
   name: string;
   description: string | null;
   type: 'expense' | 'income';
-  color: string | null;
   icon: string | null;
   isActive: boolean;
   createdAt: string;
@@ -50,7 +48,6 @@ export default function AccountsPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState<'expense' | 'income'>('expense');
-  const [color, setColor] = useState('#4CAF50');
   const [isActive, setIsActive] = useState(true);
 
   const loadAccounts = async () => {
@@ -91,14 +88,12 @@ export default function AccountsPage() {
       setName(account.name);
       setDescription(account.description || '');
       setType(account.type);
-      setColor(account.color || '#4CAF50');
       setIsActive(account.isActive);
     } else {
       setEditingAccount(null);
       setName('');
       setDescription('');
       setType('expense');
-      setColor('#4CAF50');
       setIsActive(true);
     }
     setModalOpened(true);
@@ -110,7 +105,6 @@ export default function AccountsPage() {
     setName('');
     setDescription('');
     setType('expense');
-    setColor('#4CAF50');
     setIsActive(true);
   };
 
@@ -138,7 +132,6 @@ export default function AccountsPage() {
           name: name.trim(),
           description: description.trim() || null,
           type,
-          color,
           isActive,
         }),
       });
@@ -256,19 +249,7 @@ export default function AccountsPage() {
               {accounts.map((account) => (
                 <Table.Tr key={account.id} opacity={account.isActive ? 1 : 0.5}>
                   <Table.Td>
-                    <Group gap="xs">
-                      {account.color && (
-                        <div
-                          style={{
-                            width: 16,
-                            height: 16,
-                            borderRadius: 4,
-                            backgroundColor: account.color,
-                          }}
-                        />
-                      )}
-                      <span style={{ fontWeight: 500 }}>{account.name}</span>
-                    </Group>
+                    <span style={{ fontWeight: 500 }}>{account.name}</span>
                   </Table.Td>
                   <Table.Td>
                     <span style={{ fontSize: '0.9rem', color: '#666' }}>
@@ -347,14 +328,6 @@ export default function AccountsPage() {
             { value: 'income', label: 'Receita' },
           ]}
           required
-          mb="md"
-        />
-
-        <ColorInput
-          label="Cor"
-          placeholder="Escolha uma cor"
-          value={color}
-          onChange={setColor}
           mb="md"
         />
 

@@ -118,6 +118,51 @@ export async function POST(
       return NextResponse.json({ error: 'Contas de origem e destino devem ser diferentes' }, { status: 400 });
     }
 
+    // Se force=true, pular validações de duplicação
+    if (!body.force) {
+      // Verificar duplicação: mesma origem, destino, valor e data
+      const existingTransfer = await db
+        .select()
+        .from(transfers)
+        .where(
+          and(
+            eq(transfers.financialControlId, controlId),
+            eq(transfers.fromBankAccountId, body.fromBankAccountId),
+            eq(transfers.toBankAccountId, body.toBankAccountId),
+            eq(transfers.amount, body.amount),
+            eq(transfers.transferDate, body.transferDate)
+          )
+        )
+        .limit(1);
+
+      if (existingTransfer.length > 0) {
+        return NextResponse.json({ 
+          error: 'Já existe uma transferência idêntica (mesma origem, destino, valor e data). Se não for duplicata, altere a data ou valor ligeiramente.' 
+        }, { status: 409 });
+      }
+
+      // Verificar duplicação reversa: mesma operação mas invertida (possível erro do usuário)
+      const reverseTransfer = await db
+        .select()
+        .from(transfers)
+        .where(
+          and(
+            eq(transfers.financialControlId, controlId),
+            eq(transfers.fromBankAccountId, body.toBankAccountId),
+            eq(transfers.toBankAccountId, body.fromBankAccountId),
+            eq(transfers.amount, body.amount),
+            eq(transfers.transferDate, body.transferDate)
+          )
+        )
+        .limit(1);
+
+      if (reverseTransfer.length > 0) {
+        return NextResponse.json({ 
+          error: 'Já existe uma transferência invertida (origem ↔ destino trocados) com mesmo valor e data. Você pode estar duplicando o lançamento.' 
+        }, { status: 409 });
+      }
+    }
+
     // Criar transferência
     const [newTransfer] = await db
       .insert(transfers)

@@ -30,6 +30,7 @@ import {
   IconChartLine,
   IconList,
   IconFileInvoice,
+  IconReportAnalytics,
 } from '@tabler/icons-react';
 import { MonthlyView } from '@/components/control/MonthlyView';
 import { BankAccounts } from '@/components/control/BankAccounts';
@@ -38,6 +39,7 @@ import { ProvisionedTransactions } from '@/components/control/ProvisionedTransac
 import { Overview } from '@/components/control/Overview';
 import { Projection } from '@/components/control/Projection';
 import { Accounts } from '@/components/control/Accounts';
+import { MonthlySummaryView } from '@/components/control/MonthlySummaryView';
 
 interface FinancialControl {
   id: string;
@@ -224,6 +226,14 @@ export default function ControlPage() {
             onClick={() => setActiveView('provisioned')}
             description="Despesas recorrentes"
           />
+
+          <NavLink
+            label="Resumo Mensal"
+            leftSection={<IconReportAnalytics size="1.2rem" />}
+            active={activeView === 'summary'}
+            onClick={() => setActiveView('summary')}
+            description="Grids de resumo por conta/classificação"
+          />
         </AppShell.Section>
 
         <AppShell.Section>
@@ -241,6 +251,7 @@ export default function ControlPage() {
         {activeView === 'provisioned' && <ProvisionedTransactions controlId={control.id} />}
         {activeView === 'overview' && <Overview controlId={control.id} />}
         {activeView === 'projection' && <Projection controlId={control.id} />}
+        {activeView === 'summary' && <MonthlySummaryView controlId={control.id} />}
       </AppShell.Main>
     </AppShell>
   );

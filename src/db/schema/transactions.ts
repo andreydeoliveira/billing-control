@@ -17,7 +17,7 @@ export const provisionedTransactions = pgTable('provisioned_transactions', {
   
   expectedAmount: numeric('expected_amount', { precision: 15, scale: 2 }).notNull(),
   
-  // Fonte de pagamento (obrigatório: ou conta bancária ou cartão)
+  // Fonte de pagamento (OPCIONAL: pode ser null = conta a pagar, ou conta bancária, ou cartão)
   bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id, { onDelete: 'set null' }),
   cardId: uuid('card_id').references(() => cards.id, { onDelete: 'set null' }),
   
@@ -27,6 +27,7 @@ export const provisionedTransactions = pgTable('provisioned_transactions', {
   installments: integer('installments'), // número de parcelas (null se não for parcelado)
   currentInstallment: integer('current_installment').default(1), // parcela atual
   startDate: date('start_date'), // data de início das parcelas (quando não é recorrente)
+  endDate: date('end_date'), // data final (opcional - quando encerrar assinatura/contrato)
   
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

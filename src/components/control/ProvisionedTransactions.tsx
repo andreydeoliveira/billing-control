@@ -17,7 +17,6 @@ import {
   Group,
   Switch,
   Skeleton,
-  ColorInput,
   Textarea,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
@@ -41,6 +40,7 @@ interface ProvisionedTransaction {
   accountName?: string;
   observation?: string | null;
   startDate?: string | null;
+  endDate?: string | null;
   createdAt: string;
 }
 
@@ -70,6 +70,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
   const [transactions, setTransactions] = useState<ProvisionedTransaction[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<ProvisionedTransaction[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -98,31 +99,37 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     accountId: '',
     observation: '',
     expectedAmount: '',
-    paymentSource: 'bank_account', // 'bank_account' ou 'card'
+    paymentSource: 'none', // 'none', 'bank_account' ou 'card'
     bankAccountId: '',
     cardId: '',
     isRecurring: true,
     recurrenceType: 'monthly', // 'monthly' ou 'yearly'
     installments: '',
-    startDate: null as Date | null,
+    startDate: new Date() as Date | null,
+    endDate: null as Date | null,
   });
   const [editFormData, setEditFormData] = useState({
     accountId: '',
     observation: '',
     expectedAmount: '',
-    paymentSource: 'bank_account',
+    paymentSource: 'none', // 'none', 'bank_account' ou 'card'
     bankAccountId: '',
     cardId: '',
     isRecurring: true,
     recurrenceType: 'monthly',
     installments: '',
     startDate: null as Date | null,
+    endDate: null as Date | null,
   });
   const [quickAccountData, setQuickAccountData] = useState({
     name: '',
     type: 'expense' as 'expense' | 'income',
-    color: '#4CAF50',
+    classificationId: null as string | null,
   });
+  const [classifications, setClassifications] = useState<Array<{ id: string; name: string }>>([]);
+  const [newClassificationModalOpened, setNewClassificationModalOpened] = useState(false);
+  const [newClassificationName, setNewClassificationName] = useState('');
+  const [newClassificationDescription, setNewClassificationDescription] = useState('');
 
   const loadTransactions = async () => {
     setPageLoading(true);
@@ -176,28 +183,106 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     }
   };
 
+  const loadClassifications = async () => {
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/classifications`);
+      if (response.ok) {
+        const data = await response.json();
+        setClassifications(data.filter((c: any) => c.isActive));
+      }
+    } catch (error) {
+      console.error('Erro ao carregar classificações:', error);
+    }
+  };
+
   useEffect(() => {
     loadTransactions();
     loadBankAccounts();
     loadCards();
     loadAccounts();
+    loadClassifications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlId]);
 
   useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredTransactions(transactions);
-    } else {
+    let filtered = transactions;
+
+    // Filtro por status (ativo/inativo)
+    if (statusFilter !== 'all') {
+      const today = new Date().toISOString().split('T')[0];
+      filtered = filtered.filter((transaction) => {
+        if (statusFilter === 'active') {
+          return !transaction.endDate || transaction.endDate >= today;
+        } else {
+          return transaction.endDate && transaction.endDate < today;
+        }
+      });
+    }
+
+    // Filtro por busca
+    if (searchQuery.trim() !== '') {
       const query = searchQuery.toLowerCase();
-      const filtered = transactions.filter(
+      filtered = filtered.filter(
         (transaction) =>
           transaction.name.toLowerCase().includes(query) ||
           (transaction.bankAccountName && transaction.bankAccountName.toLowerCase().includes(query)) ||
           (transaction.cardName && transaction.cardName.toLowerCase().includes(query))
       );
-      setFilteredTransactions(filtered);
     }
-  }, [searchQuery, transactions]);
+
+    setFilteredTransactions(filtered);
+  }, [searchQuery, transactions, statusFilter]);
+
+  const handleCreateClassification = async () => {
+    if (!newClassificationName.trim()) {
+      notifications.show({
+        title: 'Erro',
+        message: 'Digite o nome da classificação',
+        color: 'red',
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/financial-controls/${controlId}/classifications`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newClassificationName,
+            description: newClassificationDescription || null,
+            isActive: true,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const newClassification = await response.json();
+        notifications.show({
+          title: 'Sucesso',
+          message: `Classificação "${newClassificationName}" criada`,
+          color: 'green',
+        });
+        setNewClassificationModalOpened(false);
+        setNewClassificationName('');
+        setNewClassificationDescription('');
+        await loadClassifications();
+        setQuickAccountData({ ...quickAccountData, classificationId: newClassification.id });
+      } else {
+        throw new Error('Erro ao criar classificação');
+      }
+    } catch {
+      notifications.show({
+        title: 'Erro',
+        message: 'Não foi possível criar a classificação',
+        color: 'red',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleQuickAccountCreate = async () => {
     if (!quickAccountData.name) {
@@ -216,7 +301,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
         body: JSON.stringify({
           name: quickAccountData.name,
           type: quickAccountData.type,
-          color: quickAccountData.color,
+          classificationId: quickAccountData.classificationId,
           isActive: true,
         }),
       });
@@ -238,7 +323,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
         
         // Fechar modal e limpar
         setQuickAccountModalOpened(false);
-        setQuickAccountData({ name: '', type: 'expense', color: '#4CAF50' });
+        setQuickAccountData({ name: '', type: 'expense', classificationId: null });
       } else {
         notifications.show({
           title: 'Erro',
@@ -299,6 +384,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           recurrenceType: formData.isRecurring ? formData.recurrenceType : null,
           installments: formData.installments ? parseInt(formData.installments) : null,
           startDate: formData.startDate ? formData.startDate.toISOString().split('T')[0] : null,
+          endDate: formData.endDate ? formData.endDate.toISOString().split('T')[0] : null,
         }),
       });
 
@@ -413,17 +499,27 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
 
   const openEditModal = (transaction: ProvisionedTransaction) => {
     setSelectedTransaction(transaction);
+    
+    // Determinar paymentSource: none se não tem nem banco nem cartão, bank_account se tem banco, card se tem cartão
+    let paymentSource: string = 'none';
+    if (transaction.bankAccountId) {
+      paymentSource = 'bank_account';
+    } else if (transaction.cardId) {
+      paymentSource = 'card';
+    }
+    
     setEditFormData({
       accountId: transaction.accountId,
       observation: transaction.observation || '',
       expectedAmount: transaction.expectedAmount,
-      paymentSource: transaction.bankAccountId ? 'bank_account' : 'card',
+      paymentSource,
       bankAccountId: transaction.bankAccountId || '',
       cardId: transaction.cardId || '',
       isRecurring: transaction.isRecurring,
       recurrenceType: transaction.recurrenceType || 'monthly',
       installments: transaction.installments ? String(transaction.installments) : '',
       startDate: transaction.startDate ? new Date(transaction.startDate) : null,
+      endDate: transaction.endDate ? new Date(transaction.endDate) : null,
     });
     setEditModalOpened(true);
   };
@@ -475,6 +571,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             recurrenceType: editFormData.isRecurring ? editFormData.recurrenceType : null,
             installments: editFormData.installments ? parseInt(editFormData.installments) : null,
             startDate: editFormData.startDate ? editFormData.startDate.toISOString().split('T')[0] : null,
+            endDate: editFormData.endDate ? editFormData.endDate.toISOString().split('T')[0] : null,
           }),
         }
       );
@@ -509,7 +606,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     if (transaction.cardId) {
       return transaction.cardName || 'Cartão';
     }
-    return '-';
+    return '⚠️ Conta a Pagar';
   };
 
   const handleGenerateFuture = async () => {
@@ -571,19 +668,45 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           >
             Gerar Previsões Futuras
           </Button>
-          <Button leftSection={<IconPlus size={16} />} onClick={() => setModalOpened(true)}>
+          <Button leftSection={<IconPlus size={16} />} onClick={() => {
+            setFormData({
+              ...formData,
+              accountId: '',
+              observation: '',
+              expectedAmount: '',
+              paymentSource: 'none',
+              bankAccountId: '',
+              cardId: '',
+              startDate: new Date(),
+            });
+            setModalOpened(true);
+          }}>
             Novo Provisionado
           </Button>
         </Group>
       </Group>
 
       <Paper shadow="xs" p="md">
-        <TextInput
-          placeholder="Buscar por nome ou fonte de pagamento..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          mb="md"
-        />
+        <Group mb="md">
+          <TextInput
+            placeholder="Buscar por nome ou fonte de pagamento..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ flex: 1 }}
+          />
+          <Select
+            placeholder="Filtrar por status"
+            data={[
+              { value: 'all', label: 'Todos' },
+              { value: 'active', label: 'Ativos' },
+              { value: 'inactive', label: 'Inativos' },
+            ]}
+            value={statusFilter}
+            onChange={(value) => setStatusFilter(value as 'all' | 'active' | 'inactive')}
+            clearable={false}
+            style={{ width: 150 }}
+          />
+        </Group>
 
         <Table striped highlightOnHover>
           <Table.Thead>
@@ -681,13 +804,13 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             accountId: '',
             observation: '',
             expectedAmount: '',
-            paymentSource: 'bank_account',
+            paymentSource: 'none',
             bankAccountId: '',
             cardId: '',
             isRecurring: false,
             recurrenceType: 'monthly',
             installments: '',
-            startDate: null,
+            startDate: new Date(),
           });
         }}
         title="Novo Gasto Provisionado"
@@ -738,14 +861,15 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           />
 
           <Select
-            label="Forma de Pagamento"
+            label="Forma de Pagamento (Opcional)"
+            placeholder="Deixe vazio se não souber ainda"
             data={[
+              { value: 'none', label: 'A definir (Conta a pagar)' },
               { value: 'bank_account', label: 'Conta Bancária' },
               { value: 'card', label: 'Cartão' },
             ]}
             value={formData.paymentSource}
-            onChange={(value) => setFormData({ ...formData, paymentSource: value || 'bank_account', bankAccountId: '', cardId: '' })}
-            required
+            onChange={(value) => setFormData({ ...formData, paymentSource: value || 'none', bankAccountId: '', cardId: '' })}
           />
 
           {formData.paymentSource === 'bank_account' && (
@@ -758,6 +882,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
               }))}
               value={formData.bankAccountId}
               onChange={(value) => setFormData({ ...formData, bankAccountId: value || '' })}
+              searchable
               required
             />
           )}
@@ -772,6 +897,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
               }))}
               value={formData.cardId}
               onChange={(value) => setFormData({ ...formData, cardId: value || '' })}
+              searchable
               required
             />
           )}
@@ -806,6 +932,16 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 required
               />
 
+              <DateInput
+                label="Data Final (Opcional)"
+                placeholder="Quando encerrar (ex: cancelou Netflix)"
+                value={formData.endDate}
+                onChange={(value) => setFormData({ ...formData, endDate: value })}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                description="Deixe em branco para recorrência indefinida"
+              />
+
               <Text size="xs" c="dimmed">
                 {formData.recurrenceType === 'monthly' 
                   ? 'Transações mensais serão geradas automaticamente (12 meses inicialmente)'
@@ -832,6 +968,16 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 onChange={(value) => setFormData({ ...formData, startDate: value })}
                 valueFormat="DD/MM/YYYY"
                 clearable
+              />
+
+              <DateInput
+                label="Data Final (Opcional)"
+                placeholder="Quando encerrar"
+                value={formData.endDate}
+                onChange={(value) => setFormData({ ...formData, endDate: value })}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                description="Para gastos com prazo definido"
               />
             </>
           )}
@@ -887,14 +1033,15 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           />
 
           <Select
-            label="Forma de Pagamento"
+            label="Forma de Pagamento (Opcional)"
+            placeholder="Deixe vazio se não souber ainda"
             data={[
+              { value: 'none', label: 'A definir (Conta a pagar)' },
               { value: 'bank_account', label: 'Conta Bancária' },
               { value: 'card', label: 'Cartão' },
             ]}
             value={editFormData.paymentSource}
-            onChange={(value) => setEditFormData({ ...editFormData, paymentSource: value || 'bank_account', bankAccountId: '', cardId: '' })}
-            required
+            onChange={(value) => setEditFormData({ ...editFormData, paymentSource: value || 'none', bankAccountId: '', cardId: '' })}
           />
 
           {editFormData.paymentSource === 'bank_account' && (
@@ -907,6 +1054,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
               }))}
               value={editFormData.bankAccountId}
               onChange={(value) => setEditFormData({ ...editFormData, bankAccountId: value || '' })}
+              searchable
               required
             />
           )}
@@ -921,6 +1069,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
               }))}
               value={editFormData.cardId}
               onChange={(value) => setEditFormData({ ...editFormData, cardId: value || '' })}
+              searchable
               required
             />
           )}
@@ -955,6 +1104,16 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 required
               />
 
+              <DateInput
+                label="Data Final (Opcional)"
+                placeholder="Quando encerrar (ex: cancelou Netflix)"
+                value={editFormData.endDate}
+                onChange={(value) => setEditFormData({ ...editFormData, endDate: value })}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                description="Deixe em branco para recorrência indefinida"
+              />
+
               <Text size="xs" c="dimmed">
                 {editFormData.recurrenceType === 'monthly' 
                   ? 'Transações mensais serão geradas automaticamente (12 meses inicialmente)'
@@ -982,6 +1141,16 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 valueFormat="DD/MM/YYYY"
                 clearable
               />
+
+              <DateInput
+                label="Data Final (Opcional)"
+                placeholder="Quando encerrar"
+                value={editFormData.endDate}
+                onChange={(value) => setEditFormData({ ...editFormData, endDate: value })}
+                valueFormat="DD/MM/YYYY"
+                clearable
+                description="Para gastos com prazo definido"
+              />
             </>
           )}
 
@@ -996,7 +1165,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
         opened={quickAccountModalOpened}
         onClose={() => {
           setQuickAccountModalOpened(false);
-          setQuickAccountData({ name: '', type: 'expense', color: '#228BE6' });
+          setQuickAccountData({ name: '', type: 'expense', classificationId: null });
         }}
         title="Criar Conta Rapidamente"
         size="sm"
@@ -1022,17 +1191,78 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             required
           />
           
-          <ColorInput
-            label="Cor"
-            value={quickAccountData.color}
-            onChange={(value) => setQuickAccountData({ ...quickAccountData, color: value })}
-            format="hex"
-            swatches={['#228BE6', '#40C057', '#FA5252', '#FD7E14', '#BE4BDB', '#15AABF', '#E64980']}
-          />
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>Classificação</Text>
+            <Group gap="xs" align="flex-end">
+              <Select
+                placeholder="Selecione uma classificação (opcional)"
+                value={quickAccountData.classificationId}
+                onChange={(value) => setQuickAccountData({ ...quickAccountData, classificationId: value })}
+                data={classifications.map(c => ({ value: c.id, label: c.name }))}
+                clearable
+                searchable
+                style={{ flex: 1 }}
+              />
+              <Button
+                variant="light"
+                size="sm"
+                onClick={() => setNewClassificationModalOpened(true)}
+              >
+                +
+              </Button>
+            </Group>
+          </Stack>
 
           <Button fullWidth onClick={handleQuickAccountCreate} loading={loading}>
             Criar e Selecionar
           </Button>
+        </Stack>
+      </Modal>
+
+      {/* Modal: Nova Classificação */}
+      <Modal
+        opened={newClassificationModalOpened}
+        onClose={() => {
+          setNewClassificationModalOpened(false);
+          setNewClassificationName('');
+          setNewClassificationDescription('');
+        }}
+        title="Nova Classificação"
+        size="sm"
+      >
+        <Stack>
+          <TextInput
+            label="Nome"
+            placeholder="Ex: Moradia, Transporte, Alimentação"
+            value={newClassificationName}
+            onChange={(e) => setNewClassificationName(e.target.value)}
+            required
+            data-autofocus
+          />
+
+          <Textarea
+            label="Descrição"
+            placeholder="Descrição opcional"
+            value={newClassificationDescription}
+            onChange={(e) => setNewClassificationDescription(e.target.value)}
+            rows={3}
+          />
+
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="default"
+              onClick={() => {
+                setNewClassificationModalOpened(false);
+                setNewClassificationName('');
+                setNewClassificationDescription('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleCreateClassification} loading={loading}>
+              Criar
+            </Button>
+          </Group>
         </Stack>
       </Modal>
 

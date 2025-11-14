@@ -4,22 +4,38 @@ import type { NextRequest } from 'next/server';
 
 export async function proxy(req: NextRequest) {
   const session = await auth();
+  const { pathname } = req.nextUrl;
   const isLoggedIn = !!session?.user;
-  const isAuthPage = req.nextUrl.pathname.startsWith('/auth');
-  const isApiAuthRoute = req.nextUrl.pathname.startsWith('/api/auth');
 
-  // Permitir rotas de autenticação da API
-  if (isApiAuthRoute) {
+  // Rotas de API de autenticação (sempre permitidas)
+  if (pathname.startsWith('/api/auth')) {
     return NextResponse.next();
   }
 
-  // Se está logado e tenta acessar página de auth, redireciona para dashboard
-  if (isLoggedIn && isAuthPage) {
+  // Rotas protegidas que requerem autenticação
+  const isProtectedRoute = 
+    pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/control') ||
+    pathname.startsWith('/api/financial-controls') ||
+    pathname.startsWith('/api/users');
+
+  // Se não está logado e tenta acessar rota protegida
+  if (!isLoggedIn && isProtectedRoute) {
+    return NextResponse.redirect(new URL('/auth/signin', req.url));
+  }
+
+  // Se está logado e tenta acessar página de login/cadastro
+  if (isLoggedIn && (pathname === '/auth/signin' || pathname === '/auth/signup')) {
     return NextResponse.redirect(new URL('/dashboard', req.url));
   }
 
-  // Se não está logado e tenta acessar página protegida, redireciona para login
-  if (!isLoggedIn && !isAuthPage && req.nextUrl.pathname !== '/') {
+  // Se está logado e acessa a raiz, vai para dashboard
+  if (isLoggedIn && pathname === '/') {
+    return NextResponse.redirect(new URL('/dashboard', req.url));
+  }
+
+  // Se não está logado e acessa a raiz, vai para login
+  if (!isLoggedIn && pathname === '/') {
     return NextResponse.redirect(new URL('/auth/signin', req.url));
   }
 
@@ -27,5 +43,14 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder images
+     */
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
 };

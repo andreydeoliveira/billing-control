@@ -3,6 +3,7 @@ import { relations } from 'drizzle-orm';
 import { financialControls } from './financial-controls';
 import { provisionedTransactions } from './transactions';
 import { monthlyTransactions } from './monthly-transactions';
+import { accountClassifications } from './classifications';
 
 // Contas de despesas/receitas (ex: Luz, Água, Internet, Uber, Alimentação, etc)
 export const expenseIncomeAccounts = pgTable('expense_income_accounts', {
@@ -11,7 +12,7 @@ export const expenseIncomeAccounts = pgTable('expense_income_accounts', {
   name: text('name').notNull(), // Ex: "Luz", "Água", "Uber", "Alimentação"
   description: text('description'), // Descrição adicional
   type: text('type').notNull(), // 'expense' ou 'income'
-  color: text('color'), // cor para identificação visual (ex: #FF5733)
+  classificationId: uuid('classification_id').references(() => accountClassifications.id, { onDelete: 'set null' }), // Classificação (Moradia, Transporte, etc)
   icon: text('icon'), // ícone para identificação visual
   isActive: boolean('is_active').notNull().default(true), // se a conta está ativa
   createdAt: timestamp('created_at').defaultNow().notNull(),
