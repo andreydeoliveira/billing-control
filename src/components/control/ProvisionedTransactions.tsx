@@ -22,6 +22,7 @@ import {
 import { DateInput } from '@mantine/dates';
 import { IconPlus, IconEdit, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
+import { parseBrazilianDate } from '@/lib/date-parser';
 
 interface ProvisionedTransaction {
   id: string;
@@ -569,6 +570,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             expectedAmount: editFormData.expectedAmount,
             bankAccountId: editFormData.paymentSource === 'bank_account' ? editFormData.bankAccountId : null,
             cardId: editFormData.paymentSource === 'card' ? editFormData.cardId : null,
+            paymentSource: editFormData.paymentSource, // Enviar para o backend saber qual limpar
             isRecurring: editFormData.isRecurring,
             recurrenceType: editFormData.isRecurring ? editFormData.recurrenceType : null,
             installments: editFormData.installments ? parseInt(editFormData.installments) : null,
@@ -931,6 +933,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={formData.startDate}
                 onChange={(value) => setFormData({ ...formData, startDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
                 required
               />
@@ -941,6 +944,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={formData.endDate}
                 onChange={(value) => setFormData({ ...formData, endDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
                 description="Deixe em branco para recorrência indefinida"
               />
@@ -970,6 +974,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={formData.startDate}
                 onChange={(value) => setFormData({ ...formData, startDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
               />
 
@@ -979,6 +984,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={formData.endDate}
                 onChange={(value) => setFormData({ ...formData, endDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
                 description="Para gastos com prazo definido"
               />
@@ -1103,6 +1109,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={editFormData.startDate}
                 onChange={(value) => setEditFormData({ ...editFormData, startDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
                 required
               />
@@ -1113,6 +1120,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={editFormData.endDate}
                 onChange={(value) => setEditFormData({ ...editFormData, endDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
                 description="Deixe em branco para recorrência indefinida"
               />
@@ -1142,6 +1150,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={editFormData.startDate}
                 onChange={(value) => setEditFormData({ ...editFormData, startDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
               />
 
@@ -1151,6 +1160,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
                 value={editFormData.endDate}
                 onChange={(value) => setEditFormData({ ...editFormData, endDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
                 description="Para gastos com prazo definido"
               />

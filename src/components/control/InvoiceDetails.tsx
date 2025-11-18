@@ -22,6 +22,7 @@ import { IconCreditCard, IconEdit, IconTrash, IconPlus, IconCheck } from '@table
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import dayjs from 'dayjs';
+import { parseBrazilianDate } from '@/lib/date-parser';
 
 interface Transaction {
   id: string;
@@ -95,6 +96,7 @@ export function InvoiceDetails({
     accountId: '',
     expectedAmount: '',
     paidDate: null as Date | null,
+    observation: '',
   });
   const [newAccountForm, setNewAccountForm] = useState({
     name: '',
@@ -456,6 +458,7 @@ export function InvoiceDetails({
             paymentMethod: 'credit_card',
             cardId: cardId,
             monthYear: dayjs().format('YYYY-MM'),
+            observation: addForm.observation || null,
           }),
         }
       );
@@ -696,6 +699,7 @@ export function InvoiceDetails({
                 value={paymentForm.paidDate}
                 onChange={(value) => setPaymentForm({ ...paymentForm, paidDate: value || new Date() })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 style={{ width: 140 }}
                 required
               />
@@ -741,6 +745,7 @@ export function InvoiceDetails({
                 value={editForm.paidDate}
                 onChange={(value) => setEditForm({ ...editForm, paidDate: value })}
                 valueFormat="DD/MM/YYYY"
+                dateParser={parseBrazilianDate}
                 clearable
               />
 
@@ -801,7 +806,16 @@ export function InvoiceDetails({
             value={addForm.paidDate}
             onChange={(value) => setAddForm({ ...addForm, paidDate: value })}
             valueFormat="DD/MM/YYYY"
+            dateParser={parseBrazilianDate}
             clearable
+          />
+
+          <Textarea
+            label="Observação (Opcional)"
+            placeholder="Ex: Compra parcelada, desconto, etc."
+            value={addForm.observation}
+            onChange={(e) => setAddForm({ ...addForm, observation: e.target.value })}
+            rows={2}
           />
 
           <Group justify="space-between">

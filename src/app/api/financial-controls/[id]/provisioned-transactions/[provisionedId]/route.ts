@@ -119,6 +119,9 @@ export async function PATCH(
     const validatedInstallments = validateInstallments(body.installments);
 
     // Forma de pagamento é opcional (pode ser "conta a pagar")
+    // Garantir que quando muda a fonte de pagamento, o campo anterior seja limpo
+    const bankAccountId = body.bankAccountId && body.bankAccountId !== '' ? body.bankAccountId : null;
+    const cardId = body.cardId && body.cardId !== '' ? body.cardId : null;
 
     // Atualizar provisionado
     await db
@@ -127,8 +130,8 @@ export async function PATCH(
         accountId: body.accountId,
         observation: body.observation || null,
         expectedAmount: validatedAmount,
-        bankAccountId: body.bankAccountId || null,
-        cardId: body.cardId || null,
+        bankAccountId,
+        cardId,
         isRecurring: body.isRecurring,
         installments: validatedInstallments,
         startDate: body.startDate || null,

@@ -24,6 +24,7 @@ import { IconPlus, IconEdit, IconCreditCard, IconArrowsExchange, IconTrash } fro
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { modals } from '@mantine/modals';
+import { parseBrazilianDate } from '@/lib/date-parser';
 import { InvoiceDetails } from './InvoiceDetails';
 import dayjs from 'dayjs';
 import 'dayjs/locale/pt-br';
@@ -1470,6 +1471,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             value={transactionForm.paidDate}
             onChange={(value) => setTransactionForm({ ...transactionForm, paidDate: value })}
             valueFormat="DD/MM/YYYY"
+            dateParser={parseBrazilianDate}
           />
 
           <Group justify="flex-end" mt="md">
@@ -1544,6 +1546,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             value={transferForm.transferDate}
             onChange={(value) => setTransferForm({ ...transferForm, transferDate: value || new Date() })}
             valueFormat="DD/MM/YYYY"
+            dateParser={parseBrazilianDate}
             required
           />
 
@@ -1593,6 +1596,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             value={editTransferForm.transferDate}
             onChange={(value) => setEditTransferForm({ ...editTransferForm, transferDate: value || new Date() })}
             valueFormat="DD/MM/YYYY"
+            dateParser={parseBrazilianDate}
             required
           />
 
@@ -1710,6 +1714,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             value={editTransactionForm.paidDate}
             onChange={(value) => setEditTransactionForm({ ...editTransactionForm, paidDate: value })}
             valueFormat="DD/MM/YYYY"
+            dateParser={parseBrazilianDate}
           />
 
           <Group justify="flex-end" mt="md">
