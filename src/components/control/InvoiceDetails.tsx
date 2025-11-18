@@ -330,6 +330,7 @@ export function InvoiceDetails({
       accountId: '',
       expectedAmount: '',
       paidDate: null,
+      observation: '',
     });
     setAddModalOpened(true);
   };
