@@ -125,6 +125,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     name: '',
     type: 'expense' as 'expense' | 'income',
     classificationId: null as string | null,
+    description: '',
   });
   const [classifications, setClassifications] = useState<Array<{ id: string; name: string }>>([]);
   const [newClassificationModalOpened, setNewClassificationModalOpened] = useState(false);
@@ -323,7 +324,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
         
         // Fechar modal e limpar
         setQuickAccountModalOpened(false);
-        setQuickAccountData({ name: '', type: 'expense', classificationId: null });
+        setQuickAccountData({ name: '', type: 'expense', classificationId: null, description: '' });
       } else {
         notifications.show({
           title: 'Erro',
@@ -1165,7 +1166,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
         opened={quickAccountModalOpened}
         onClose={() => {
           setQuickAccountModalOpened(false);
-          setQuickAccountData({ name: '', type: 'expense', classificationId: null });
+          setQuickAccountData({ name: '', type: 'expense', classificationId: null, description: '' });
         }}
         title="Criar Conta Rapidamente"
         size="sm"
@@ -1177,6 +1178,14 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             value={quickAccountData.name}
             onChange={(e) => setQuickAccountData({ ...quickAccountData, name: e.currentTarget.value })}
             required
+          />
+          
+          <Textarea
+            label="Observação"
+            placeholder="Descrição opcional da conta"
+            value={quickAccountData.description}
+            onChange={(e) => setQuickAccountData({ ...quickAccountData, description: e.currentTarget.value })}
+            rows={2}
           />
           
           <Select

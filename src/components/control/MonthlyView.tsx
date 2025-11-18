@@ -143,6 +143,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     name: '',
     type: 'expense' as 'income' | 'expense',
     classificationId: null as string | null,
+    description: '',
   });
 
   const [classifications, setClassifications] = useState<Array<{ id: string; name: string }>>([]);
@@ -538,10 +539,17 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           color: 'green',
         });
         setAddAccountModalOpened(false);
-        setNewAccountForm({ name: '', type: 'expense', classificationId: null });
+        const createdAccountName = newAccountForm.name;
+        const createdAccountType = newAccountForm.type;
+        setNewAccountForm({ name: '', type: 'expense', classificationId: null, description: '' });
         await loadAccounts();
-        // Selecionar a conta recém-criada
-        setTransactionForm({ ...transactionForm, accountId: newAccount.id });
+        // Selecionar a conta recém-criada e preencher name e type
+        setTransactionForm({ 
+          ...transactionForm, 
+          accountId: newAccount.id,
+          name: createdAccountName,
+          type: createdAccountType
+        });
       } else {
         throw new Error('Erro ao criar conta');
       }
@@ -1734,6 +1742,14 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             value={newAccountForm.name}
             onChange={(e) => setNewAccountForm({ ...newAccountForm, name: e.target.value })}
             required
+          />
+
+          <Textarea
+            label="Observação"
+            placeholder="Descrição opcional da conta"
+            value={newAccountForm.description}
+            onChange={(e) => setNewAccountForm({ ...newAccountForm, description: e.target.value })}
+            rows={2}
           />
 
           <Select

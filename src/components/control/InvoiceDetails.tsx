@@ -100,6 +100,7 @@ export function InvoiceDetails({
     name: '',
     type: 'expense' as 'income' | 'expense',
     classificationId: null as string | null,
+    description: '',
   });
   const [classifications, setClassifications] = useState<Array<{ id: string; name: string }>>([]);
   const [newClassificationModalOpened, setNewClassificationModalOpened] = useState(false);
@@ -411,7 +412,7 @@ export function InvoiceDetails({
           color: 'green',
         });
         setAddAccountModalOpened(false);
-        setNewAccountForm({ name: '', type: 'expense', classificationId: null });
+        setNewAccountForm({ name: '', type: 'expense', classificationId: null, description: '' });
         
         // Recarregar contas e selecionar a nova
         await loadAccounts();
@@ -832,6 +833,14 @@ export function InvoiceDetails({
             onChange={(e) => setNewAccountForm({ ...newAccountForm, name: e.target.value })}
             required
             data-autofocus
+          />
+
+          <Textarea
+            label="Observação"
+            placeholder="Descrição opcional da conta"
+            value={newAccountForm.description}
+            onChange={(e) => setNewAccountForm({ ...newAccountForm, description: e.target.value })}
+            rows={2}
           />
 
           <Select
