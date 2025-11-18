@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { signOut } from 'next-auth/react';
+import { signOut, useSession } from 'next-auth/react';
 import {
   AppShell,
   Burger,
@@ -31,6 +31,7 @@ import {
   IconList,
   IconFileInvoice,
   IconReportAnalytics,
+  IconUserCog,
 } from '@tabler/icons-react';
 import { MonthlyView } from '@/components/control/MonthlyView';
 import { BankAccounts } from '@/components/control/BankAccounts';
@@ -48,6 +49,7 @@ interface FinancialControl {
 }
 
 export default function ControlPage() {
+  const { data: session } = useSession();
   const params = useParams();
   const router = useRouter();
   const controlId = params.id as string;
@@ -144,6 +146,14 @@ export default function ControlPage() {
               >
                 Membros do Controle
               </Menu.Item>
+              {session?.user?.email === 'andrey.oliveirasg@gmail.com' && (
+                <Menu.Item
+                  leftSection={<IconUsers style={{ width: rem(16), height: rem(16) }} />}
+                  onClick={() => router.push('/admin/users')}
+                >
+                  Administração (Todos Usuários)
+                </Menu.Item>
+              )}
               <Menu.Divider />
               <Menu.Item
                 leftSection={<IconList style={{ width: rem(16), height: rem(16) }} />}

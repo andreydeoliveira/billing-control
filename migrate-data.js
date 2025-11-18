@@ -29,6 +29,37 @@ async function migrateData() {
         await vercelClient.connect();
         console.log('✅ Conectado aos dois bancos\n');
 
+        // LIMPAR TODAS AS TABELAS NA VERCEL PRIMEIRO (ordem inversa para respeitar FK)
+        console.log('🗑️  Limpando TODAS as tabelas na Vercel...\n');
+        const tablesToClear = [
+            'accounts',
+            'transfers',
+            'monthly_transactions',
+            'provisioned_transactions',
+            'card_invoices',
+            'cards',
+            'bank_account_monthly_balances',
+            'bank_accounts',
+            'expense_income_accounts',
+            'account_classifications',
+            'financial_control_invites',
+            'financial_control_users',
+            'financial_controls',
+            'verification_tokens',
+            'sessions',
+            'users'
+        ];
+
+        for (const table of tablesToClear) {
+            try {
+                await vercelClient.query(`DELETE FROM ${table}`);
+                console.log(`   ✓ ${table} limpa`);
+            } catch (error) {
+                console.log(`   ⚠️  Erro ao limpar ${table}: ${error.message}`);
+            }
+        }
+        console.log('\n✅ Todas as tabelas limpas!\n');
+
         // Definir ordem de tabelas respeitando foreign keys
         const tablesToMigrate = [
             { local: 'users', vercel: 'users' },
@@ -39,11 +70,11 @@ async function migrateData() {
             { local: 'financial_control_invites', vercel: 'financial_control_invites' },
             { local: 'account_classifications', vercel: 'account_classifications' },
             { local: 'expense_income_accounts', vercel: 'expense_income_accounts' },
-            { local: 'provisioned_transactions', vercel: 'provisioned_transactions' },
-            { local: 'bank_accounts', vercel: 'bank_accounts' },
+            { local: 'bank_accounts', vercel: 'bank_accounts' }, // Antes de provisioned_transactions
             { local: 'bank_account_monthly_balances', vercel: 'bank_account_monthly_balances' },
-            { local: 'cards', vercel: 'cards' },
+            { local: 'cards', vercel: 'cards' }, // Antes de provisioned_transactions
             { local: 'card_invoices', vercel: 'card_invoices' },
+            { local: 'provisioned_transactions', vercel: 'provisioned_transactions' }, // Depois de bank_accounts e cards
             { local: 'monthly_transactions', vercel: 'monthly_transactions' },
             { local: 'transfers', vercel: 'transfers' },
             { local: 'accounts', vercel: 'accounts' }
@@ -73,10 +104,6 @@ async function migrateData() {
                 const data = dataResult.rows;
 
                 if (data.length > 0) {
-                    // Limpar tabela no Vercel
-                    await vercelClient.query(`DELETE FROM ${vercelTableName}`);
-                    console.log(`   🗑️  Tabela limpa no Vercel`);
-
                     // Inserir dados
                     let inserted = 0;
                     for (const row of data) {
