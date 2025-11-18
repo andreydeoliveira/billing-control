@@ -84,7 +84,7 @@ export function MonthlySummaryView({ controlId }: MonthlySummaryViewProps) {
       };
     }
 
-    acc[key].months[item.monthYear] = parseFloat(item.total) || 0;
+    acc[key].months[item.monthYear] = Number(item.total) || 0;
     return acc;
   }, {} as Record<string, { name: string; type?: string; months: Record<string, number> }>);
 
