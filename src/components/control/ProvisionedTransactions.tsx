@@ -407,6 +407,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           recurrenceType: 'monthly',
           installments: '',
           startDate: null,
+          endDate: null,
         });
         loadTransactions();
       } else {
@@ -812,6 +813,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
             recurrenceType: 'monthly',
             installments: '',
             startDate: new Date(),
+            endDate: null,
           });
         }}
         title="Novo Gasto Provisionado"
@@ -906,7 +908,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           <Switch
             label="Recorrente"
             checked={formData.isRecurring}
-            onChange={(e) => setFormData({ ...formData, isRecurring: e.currentTarget.checked, installments: '', startDate: null })}
+            onChange={(e) => setFormData({ ...formData, isRecurring: e.currentTarget.checked, installments: '', startDate: null, endDate: null })}
           />
 
           {formData.isRecurring && (

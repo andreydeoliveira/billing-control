@@ -820,7 +820,7 @@ export function InvoiceDetails({
         opened={addAccountModalOpened}
         onClose={() => {
           setAddAccountModalOpened(false);
-          setNewAccountForm({ name: '', type: 'expense', classificationId: null });
+          setNewAccountForm({ name: '', type: 'expense', classificationId: null, description: '' });
         }}
         title="Cadastro Rápido de Conta"
         size="sm"
@@ -881,7 +881,7 @@ export function InvoiceDetails({
               variant="default" 
               onClick={() => {
                 setAddAccountModalOpened(false);
-                setNewAccountForm({ name: '', type: 'expense', classificationId: null });
+                setNewAccountForm({ name: '', type: 'expense', classificationId: null, description: '' });
               }}
             >
               Cancelar

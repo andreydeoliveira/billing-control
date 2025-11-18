@@ -88,7 +88,6 @@ export async function POST(
         financialControlId: controlId,
         name,
         type,
-        color: color || '#228BE6',
       })
       .returning();
 
