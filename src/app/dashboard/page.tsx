@@ -17,6 +17,7 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 
 interface FinancialControl {
   id: string;
@@ -26,6 +27,7 @@ interface FinancialControl {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { data: session, status } = useSession();
   const [controls, setControls] = useState<FinancialControl[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpened, setModalOpened] = useState(false);
@@ -57,10 +59,30 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    loadControls();
-  }, []);
+    if (status === 'unauthenticated') {
+      router.push('/auth/signin');
+      return;
+    }
+    if (status === 'authenticated') {
+      loadControls();
+    }
+  }, [status, router]);
 
-  const handleCreateControl = async (values: typeof form.values) => {
+  // Mostrar loading enquanto verifica autenticação
+  if (status === 'loading' || loading) {
+    return (
+      <Center style={{ height: '100vh' }}>
+        <Loader size="lg" />
+      </Center>
+    );
+  }
+
+  // Não renderizar nada se não estiver autenticado
+  if (status === 'unauthenticated') {
+    return null;
+  }
+
+  async function handleCreateControl(values: typeof form.values) {
     setCreateLoading(true);
     try {
       const response = await fetch('/api/financial-controls', {
@@ -95,7 +117,7 @@ export default function DashboardPage() {
     } finally {
       setCreateLoading(false);
     }
-  };
+  }
 
   const handleOpenControl = (controlId: string) => {
     router.push(`/control/${controlId}`);
