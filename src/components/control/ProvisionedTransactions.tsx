@@ -26,7 +26,6 @@ import { parseBrazilianDate } from '@/lib/date-parser';
 
 interface ProvisionedTransaction {
   id: string;
-  name: string;
   type: string;
   expectedAmount: string;
   bankAccountId: string | null;
@@ -226,7 +225,8 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (transaction) =>
-          transaction.name.toLowerCase().includes(query) ||
+          (transaction.accountName && transaction.accountName.toLowerCase().includes(query)) ||
+          (transaction.observation && transaction.observation.toLowerCase().includes(query)) ||
           (transaction.bankAccountName && transaction.bankAccountName.toLowerCase().includes(query)) ||
           (transaction.cardName && transaction.cardName.toLowerCase().includes(query))
       );
