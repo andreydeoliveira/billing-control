@@ -118,21 +118,7 @@ export async function PATCH(
     const validatedAmount = parseAmount(body.expectedAmount).toString();
     const validatedInstallments = validateInstallments(body.installments);
 
-    // Validar que ao menos uma fonte de pagamento foi fornecida
-    if (!body.bankAccountId && !body.cardId) {
-      return NextResponse.json(
-        { error: 'Selecione ao menos uma fonte de pagamento (conta bancária ou cartão)' },
-        { status: 400 }
-      );
-    }
-
-    // Validar que apenas uma fonte foi fornecida
-    if (body.bankAccountId && body.cardId) {
-      return NextResponse.json(
-        { error: 'Selecione apenas uma fonte de pagamento' },
-        { status: 400 }
-      );
-    }
+    // Forma de pagamento é opcional (pode ser "conta a pagar")
 
     // Atualizar provisionado
     await db
@@ -146,6 +132,7 @@ export async function PATCH(
         isRecurring: body.isRecurring,
         installments: validatedInstallments,
         startDate: body.startDate || null,
+        endDate: body.endDate || null,
         updatedAt: new Date(),
       })
       .where(

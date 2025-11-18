@@ -1,17 +1,16 @@
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
-import { DrizzleAdapter } from '@auth/drizzle-adapter';
 import { db } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: DrizzleAdapter(db),
   trustHost: true, // Necessário para funcionar na Vercel
   session: {
     strategy: 'jwt',
-    maxAge: 30 * 24 * 60 * 60, // 30 dias
+    maxAge: 30 * 60, // 30 minutos de inatividade
+    updateAge: 5 * 60, // Atualiza a cada 5 minutos de atividade (renova o token)
   },
   pages: {
     signIn: '/auth/signin',

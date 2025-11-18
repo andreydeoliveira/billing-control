@@ -10,7 +10,6 @@ import {
   Modal,
   Group,
   Select,
-  ColorInput,
   Textarea,
   Badge,
   ActionIcon,
@@ -18,8 +17,9 @@ import {
   Stack,
   Text,
   Skeleton,
+  Tabs,
 } from '@mantine/core';
-import { IconPlus, IconPencil, IconTrash, IconReceipt } from '@tabler/icons-react';
+import { IconPlus, IconPencil, IconTrash, IconReceipt, IconTags } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 
 interface Account {
@@ -27,10 +27,17 @@ interface Account {
   name: string;
   description: string | null;
   type: 'expense' | 'income';
-  color: string | null;
   icon: string | null;
   isActive: boolean;
+  classificationId: string | null;
   createdAt: string;
+}
+
+interface Classification {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
 }
 
 interface AccountsProps {
@@ -39,17 +46,25 @@ interface AccountsProps {
 
 export function Accounts({ controlId }: AccountsProps) {
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [classifications, setClassifications] = useState<Classification[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpened, setModalOpened] = useState(false);
+  const [classificationModalOpened, setClassificationModalOpened] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [editingClassification, setEditingClassification] = useState<Classification | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('accounts');
   
-  // Form state
+  // Form state para contas
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState<'expense' | 'income'>('expense');
-  const [color, setColor] = useState('#4CAF50');
+  const [classificationId, setClassificationId] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(true);
+
+  // Form state para classificações
+  const [classificationName, setClassificationName] = useState('');
+  const [classificationDescription, setClassificationDescription] = useState('');
 
   const loadAccounts = async () => {
     try {
@@ -78,8 +93,28 @@ export function Accounts({ controlId }: AccountsProps) {
     }
   };
 
+  const loadClassifications = async () => {
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/classifications`);
+      const data = await response.json();
+
+      if (response.ok) {
+        setClassifications(data);
+      } else {
+        notifications.show({
+          title: 'Erro',
+          message: 'Erro ao carregar classificações',
+          color: 'red',
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao carregar classificações:', error);
+    }
+  };
+
   useEffect(() => {
     loadAccounts();
+    loadClassifications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controlId]);
 
@@ -89,14 +124,14 @@ export function Accounts({ controlId }: AccountsProps) {
       setName(account.name);
       setDescription(account.description || '');
       setType(account.type);
-      setColor(account.color || '#4CAF50');
+      setClassificationId(account.classificationId);
       setIsActive(account.isActive);
     } else {
       setEditingAccount(null);
       setName('');
       setDescription('');
       setType('expense');
-      setColor('#4CAF50');
+      setClassificationId(null);
       setIsActive(true);
     }
     setModalOpened(true);
@@ -108,7 +143,7 @@ export function Accounts({ controlId }: AccountsProps) {
     setName('');
     setDescription('');
     setType('expense');
-    setColor('#4CAF50');
+    setClassificationId(null);
     setIsActive(true);
   };
 
@@ -136,7 +171,7 @@ export function Accounts({ controlId }: AccountsProps) {
           name,
           description: description || null,
           type,
-          color,
+          classificationId: classificationId || null,
           isActive,
         }),
       });
@@ -204,6 +239,115 @@ export function Accounts({ controlId }: AccountsProps) {
     }
   };
 
+  // Fun\u00e7\u00f5es de classifica\u00e7\u00e3o
+  const openClassificationModal = (classification?: Classification) => {
+    if (classification) {
+      setEditingClassification(classification);
+      setClassificationName(classification.name);
+      setClassificationDescription(classification.description || '');
+    } else {
+      setEditingClassification(null);
+      setClassificationName('');
+      setClassificationDescription('');
+    }
+    setClassificationModalOpened(true);
+  };
+
+  const closeClassificationModal = () => {
+    setClassificationModalOpened(false);
+    setEditingClassification(null);
+    setClassificationName('');
+    setClassificationDescription('');
+  };
+
+  const handleClassificationSubmit = async () => {
+    if (!classificationName.trim()) {
+      notifications.show({
+        title: 'Erro',
+        message: 'Nome da classifica\u00e7\u00e3o \u00e9 obrigat\u00f3rio',
+        color: 'red',
+      });
+      return;
+    }
+
+    try {
+      const url = editingClassification
+        ? `/api/financial-controls/${controlId}/classifications/${editingClassification.id}`
+        : `/api/financial-controls/${controlId}/classifications`;
+      
+      const method = editingClassification ? 'PATCH' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: classificationName,
+          description: classificationDescription || null,
+          isActive: true,
+        }),
+      });
+
+      if (response.ok) {
+        notifications.show({
+          title: 'Sucesso',
+          message: editingClassification ? 'Classifica\u00e7\u00e3o atualizada' : 'Classifica\u00e7\u00e3o criada',
+          color: 'green',
+        });
+        closeClassificationModal();
+        loadClassifications();
+      } else {
+        const data = await response.json();
+        notifications.show({
+          title: 'Erro',
+          message: data.error || 'Erro ao salvar classifica\u00e7\u00e3o',
+          color: 'red',
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao salvar classifica\u00e7\u00e3o:', error);
+      notifications.show({
+        title: 'Erro',
+        message: 'Erro ao salvar classifica\u00e7\u00e3o',
+        color: 'red',
+      });
+    }
+  };
+
+  const handleDeleteClassification = async (classificationId: string) => {
+    if (!confirm('Tem certeza? As contas com esta classifica\u00e7\u00e3o ficar\u00e3o sem classifica\u00e7\u00e3o.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/classifications/${classificationId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        notifications.show({
+          title: 'Sucesso',
+          message: 'Classifica\u00e7\u00e3o exclu\u00edda',
+          color: 'green',
+        });
+        loadClassifications();
+        loadAccounts(); // Recarregar contas pois podem ter sido afetadas
+      } else {
+        notifications.show({
+          title: 'Erro',
+          message: 'Erro ao excluir classifica\u00e7\u00e3o',
+          color: 'red',
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao excluir classifica\u00e7\u00e3o:', error);
+      notifications.show({
+        title: 'Erro',
+        message: 'Erro ao excluir classifica\u00e7\u00e3o',
+        color: 'red',
+      });
+    }
+  };
+
   // Filtrar contas pela busca
   const filteredAccounts = accounts.filter((account) => {
     const query = searchQuery.toLowerCase();
@@ -216,23 +360,32 @@ export function Accounts({ controlId }: AccountsProps) {
   return (
     <>
       <Paper p="md" mb="md">
-        <Group justify="space-between" mb="md">
-          <Title order={3}>Contas</Title>
-          <Button leftSection={<IconPlus size={16} />} onClick={() => openModal()}>
-            Nova Conta
-          </Button>
-        </Group>
+        <Title order={3} mb="md">Gerenciamento de Contas</Title>
         
-        <TextInput
-          placeholder="Buscar por nome ou descrição..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{ maxWidth: 400 }}
-        />
-      </Paper>
+        <Tabs value={activeTab} onChange={(value) => setActiveTab(value || 'accounts')}>
+          <Tabs.List>
+            <Tabs.Tab value="accounts" leftSection={<IconReceipt size={16} />}>
+              Contas
+            </Tabs.Tab>
+            <Tabs.Tab value="classifications" leftSection={<IconTags size={16} />}>
+              Classificações
+            </Tabs.Tab>
+          </Tabs.List>
 
-      <Paper shadow="sm" p="md">
-        <Table striped highlightOnHover>
+          <Tabs.Panel value="accounts" pt="md">
+            <Group justify="space-between" mb="md">
+              <TextInput
+                placeholder="Buscar por nome ou descrição..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ flex: 1, maxWidth: 400 }}
+              />
+              <Button leftSection={<IconPlus size={16} />} onClick={() => openModal()}>
+                Nova Conta
+              </Button>
+            </Group>
+
+            <Table striped highlightOnHover>
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Nome</Table.Th>
@@ -281,19 +434,7 @@ export function Accounts({ controlId }: AccountsProps) {
                   style={{ cursor: 'pointer' }}
                 >
                   <Table.Td>
-                    <Group gap="xs">
-                      {account.color && (
-                        <div
-                          style={{
-                            width: 12,
-                            height: 12,
-                            borderRadius: '50%',
-                            backgroundColor: account.color,
-                          }}
-                        />
-                      )}
-                      {account.name}
-                    </Group>
+                    {account.name}
                   </Table.Td>
                   <Table.Td>{account.description || '-'}</Table.Td>
                   <Table.Td>
@@ -329,6 +470,64 @@ export function Accounts({ controlId }: AccountsProps) {
             )}
           </Table.Tbody>
         </Table>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="classifications" pt="md">
+            <Group justify="space-between" mb="md">
+              <Text size="sm" c="dimmed">
+                Classifique suas contas por categoria (ex: Moradia, Transporte, Alimentação)
+              </Text>
+              <Button leftSection={<IconPlus size={16} />} onClick={() => openClassificationModal()}>
+                Nova Classificação
+              </Button>
+            </Group>
+
+            <Table striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Nome</Table.Th>
+                  <Table.Th>Descrição</Table.Th>
+                  <Table.Th style={{ width: '120px' }}>Ações</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {classifications.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={3} style={{ textAlign: 'center', padding: 32 }}>
+                      <IconTags size={48} style={{ opacity: 0.3 }} />
+                      <Text c="dimmed">Nenhuma classificação cadastrada ainda</Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : (
+                  classifications.map((classification) => (
+                    <Table.Tr key={classification.id}>
+                      <Table.Td>{classification.name}</Table.Td>
+                      <Table.Td>{classification.description || '-'}</Table.Td>
+                      <Table.Td>
+                        <Group gap="xs">
+                          <ActionIcon
+                            variant="subtle"
+                            color="blue"
+                            onClick={() => openClassificationModal(classification)}
+                          >
+                            <IconPencil size={16} />
+                          </ActionIcon>
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            onClick={() => handleDeleteClassification(classification.id)}
+                          >
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
+              </Table.Tbody>
+            </Table>
+          </Tabs.Panel>
+        </Tabs>
       </Paper>
 
       <Modal
@@ -365,11 +564,16 @@ export function Accounts({ controlId }: AccountsProps) {
             ]}
           />
 
-          <ColorInput
-            label="Cor"
-            placeholder="Escolha uma cor"
-            value={color}
-            onChange={setColor}
+          <Select
+            label="Classificação"
+            placeholder="Selecione uma classificação (opcional)"
+            value={classificationId}
+            onChange={setClassificationId}
+            data={[
+              { value: '', label: 'Sem classificação' },
+              ...classifications.map(c => ({ value: c.id, label: c.name }))
+            ]}
+            clearable
           />
 
           <Switch
@@ -384,6 +588,40 @@ export function Accounts({ controlId }: AccountsProps) {
             </Button>
             <Button onClick={handleSubmit}>
               {editingAccount ? 'Salvar' : 'Criar'}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={classificationModalOpened}
+        onClose={closeClassificationModal}
+        title={editingClassification ? 'Editar Classificação' : 'Nova Classificação'}
+        size="md"
+      >
+        <Stack gap="md">
+          <TextInput
+            label="Nome"
+            placeholder="Ex: Moradia, Transporte, Alimentação"
+            required
+            value={classificationName}
+            onChange={(e) => setClassificationName(e.target.value)}
+          />
+
+          <Textarea
+            label="Descrição"
+            placeholder="Descrição opcional"
+            value={classificationDescription}
+            onChange={(e) => setClassificationDescription(e.target.value)}
+            rows={3}
+          />
+
+          <Group justify="flex-end" mt="md">
+            <Button variant="subtle" onClick={closeClassificationModal}>
+              Cancelar
+            </Button>
+            <Button onClick={handleClassificationSubmit}>
+              {editingClassification ? 'Salvar' : 'Criar'}
             </Button>
           </Group>
         </Stack>

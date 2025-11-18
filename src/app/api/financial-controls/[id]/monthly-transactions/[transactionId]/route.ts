@@ -85,6 +85,9 @@ export async function PATCH(
         expectedAmount: validatedExpectedAmount || currentTransaction.expectedAmount,
         actualAmount: validatedActualAmount !== undefined ? validatedActualAmount : currentTransaction.actualAmount,
         paidDate: validatedPaidDate !== undefined ? validatedPaidDate : currentTransaction.paidDate,
+        paymentMethod: body.paymentMethod !== undefined ? body.paymentMethod : currentTransaction.paymentMethod,
+        bankAccountId: body.bankAccountId !== undefined ? body.bankAccountId : currentTransaction.bankAccountId,
+        cardId: body.cardId !== undefined ? body.cardId : currentTransaction.cardId,
       })
       .where(
         and(

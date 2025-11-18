@@ -17,8 +17,9 @@ import {
   Badge,
   Skeleton,
 } from '@mantine/core';
-import { IconPlus, IconEdit, IconTrash } from '@tabler/icons-react';
+import { IconPlus, IconEdit, IconTrash, IconChartLine } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
+import { BankAccountYieldModal } from './BankAccountYieldModal';
 
 interface BankAccount {
   id: string;
@@ -38,6 +39,8 @@ export function BankAccounts({ controlId }: BankAccountsProps) {
   const [filteredAccounts, setFilteredAccounts] = useState<BankAccount[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [modalOpened, setModalOpened] = useState(false);
+  const [yieldModalOpened, setYieldModalOpened] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<BankAccount | null>(null);
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
@@ -224,7 +227,7 @@ export function BankAccounts({ controlId }: BankAccountsProps) {
               <Table.Th>Banco</Table.Th>
               <Table.Th>Saldo Inicial</Table.Th>
               <Table.Th>Controlar Saldo</Table.Th>
-              <Table.Th style={{ width: 100 }}>Ações</Table.Th>
+              <Table.Th style={{ width: 150 }}>Ações</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -275,6 +278,17 @@ export function BankAccounts({ controlId }: BankAccountsProps) {
                   </Table.Td>
                   <Table.Td>
                     <div style={{ display: 'flex', gap: 8 }}>
+                      <ActionIcon 
+                        variant="subtle" 
+                        color="green"
+                        onClick={() => {
+                          setSelectedAccount(account);
+                          setYieldModalOpened(true);
+                        }}
+                        title="Rendimentos"
+                      >
+                        <IconChartLine size={16} />
+                      </ActionIcon>
                       <ActionIcon 
                         variant="subtle" 
                         color="blue"
@@ -344,6 +358,19 @@ export function BankAccounts({ controlId }: BankAccountsProps) {
           </Button>
         </Stack>
       </Modal>
+
+      {selectedAccount && (
+        <BankAccountYieldModal
+          controlId={controlId}
+          bankAccountId={selectedAccount.id}
+          bankAccountName={selectedAccount.name}
+          opened={yieldModalOpened}
+          onClose={() => {
+            setYieldModalOpened(false);
+            setSelectedAccount(null);
+          }}
+        />
+      )}
     </div>
   );
 }

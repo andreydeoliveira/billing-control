@@ -51,7 +51,6 @@ export async function GET(
         monthYear: monthlyTransactions.monthYear,
         accountId: monthlyTransactions.accountId,
         accountName: accounts.name,
-        accountColor: accounts.color,
       })
       .from(monthlyTransactions)
       .leftJoin(accounts, eq(monthlyTransactions.accountId, accounts.id))

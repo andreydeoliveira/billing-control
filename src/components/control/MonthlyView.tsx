@@ -17,10 +17,13 @@ import {
   NumberInput,
   Tabs,
   Skeleton,
+  Autocomplete,
+  Textarea,
 } from '@mantine/core';
 import { IconPlus, IconEdit, IconCreditCard, IconArrowsExchange, IconTrash } from '@tabler/icons-react';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
+import { modals } from '@mantine/modals';
 import { InvoiceDetails } from './InvoiceDetails';
 import dayjs from 'dayjs';
 import 'dayjs/locale/pt-br';
@@ -35,7 +38,9 @@ interface Transaction {
   actualAmount: string | null;
   paidDate: string | null;
   paymentMethod: string;
+  bankAccountId?: string;
   bankAccountName?: string;
+  cardId?: string;
   cardName?: string;
   isPaid: boolean;
   isProvisioned: boolean; // Se veio de gasto provisionado
@@ -59,6 +64,16 @@ interface CardInvoice {
   isPaid: boolean;
   paidDate: string | null;
   transactionCount: number;
+  actualTotal: string;       // Total confirmado (actualAmount)
+  expectedTotal: string;     // Total provisionado (expectedAmount)
+  hasPendingTransactions: boolean; // Tem transações não confirmadas
+  bankAccountId: string | null;
+}
+
+interface ExpenseIncomeAccount {
+  id: string;
+  name: string;
+  type: 'income' | 'expense';
 }
 
 interface BankAccount {
@@ -97,6 +112,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([]);
+  const [accounts, setAccounts] = useState<ExpenseIncomeAccount[]>([]);
   
   // Modais
   const [transactionModalOpened, setTransactionModalOpened] = useState(false);
@@ -104,6 +120,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
   const [transferModalOpened, setTransferModalOpened] = useState(false);
   const [editTransferModalOpened, setEditTransferModalOpened] = useState(false);
   const [invoiceDetailsOpened, setInvoiceDetailsOpened] = useState(false);
+  const [addAccountModalOpened, setAddAccountModalOpened] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<CardInvoice | null>(null);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [selectedTransfer, setSelectedTransfer] = useState<Transfer | null>(null);
@@ -112,6 +129,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
 
   // Form data
   const [transactionForm, setTransactionForm] = useState({
+    accountId: '',
     name: '',
     type: 'expense' as 'income' | 'expense',
     expectedAmount: '',
@@ -121,16 +139,33 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     paidDate: null as Date | null,
   });
 
+  const [newAccountForm, setNewAccountForm] = useState({
+    name: '',
+    type: 'expense' as 'income' | 'expense',
+    classificationId: null as string | null,
+    description: '',
+  });
+
+  const [classifications, setClassifications] = useState<Array<{ id: string; name: string }>>([]);
+  const [newClassificationModalOpened, setNewClassificationModalOpened] = useState(false);
+  const [newClassificationName, setNewClassificationName] = useState('');
+  const [newClassificationDescription, setNewClassificationDescription] = useState('');
+
   const [editTransactionForm, setEditTransactionForm] = useState({
     name: '',
     expectedAmount: '',
     actualAmount: '',
     paidDate: null as Date | null,
+    paymentMethod: 'bank_account' as string,
+    bankAccountId: '',
+    cardId: '',
   });
 
   const [transferForm, setTransferForm] = useState({
     fromBankAccountId: '',
     toBankAccountId: '',
+    fromName: '',
+    toName: '',
     amount: '',
     transferDate: new Date(),
     description: '',
@@ -211,6 +246,30 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     }
   };
 
+  const loadAccounts = async () => {
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/expense-income-accounts`);
+      if (response.ok) {
+        const data = await response.json();
+        setAccounts(data);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar contas:', error);
+    }
+  };
+
+  const loadClassifications = async () => {
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/classifications`);
+      if (response.ok) {
+        const data = await response.json();
+        setClassifications(data.filter((c: any) => c.isActive));
+      }
+    } catch (error) {
+      console.error('Erro ao carregar classificações:', error);
+    }
+  };
+
   const loadAccountBalances = async () => {
     try {
       const response = await fetch(`/api/financial-controls/${controlId}/account-balances?month=${currentMonth}`);
@@ -233,6 +292,9 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         loadBankAccounts(),
         loadCards(),
         loadAccountBalances(),
+        loadAccounts(),
+        loadClassifications(),
+        loadAccounts(),
       ]);
     } finally {
       setPageLoading(false);
@@ -292,6 +354,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         });
         setTransactionModalOpened(false);
         setTransactionForm({
+          accountId: '',
           name: '',
           type: 'expense',
           expectedAmount: '',
@@ -315,7 +378,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     }
   };
 
-  const handleTransferSubmit = async () => {
+  const handleTransferSubmit = async (force = false) => {
     if (!transferForm.fromBankAccountId || !transferForm.toBankAccountId || !transferForm.amount) {
       notifications.show({
         title: 'Erro',
@@ -343,6 +406,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           ...transferForm,
           monthYear: currentMonth,
           transferDate: dayjs(transferForm.transferDate).format('YYYY-MM-DD'),
+          force, // Enviar flag force para a API
         }),
       });
 
@@ -356,15 +420,34 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         setTransferForm({
           fromBankAccountId: '',
           toBankAccountId: '',
+          fromName: '',
+          toName: '',
           amount: '',
           transferDate: new Date(),
           description: '',
         });
         loadAllData();
+      } else if (response.status === 409) {
+        const data = await response.json();
+        
+        // Mostrar modal de confirmação
+        modals.openConfirmModal({
+          title: '⚠️ Transferência Duplicada',
+          children: (
+            <Text size="sm">
+              {data.error}
+              <br /><br />
+              <strong>Deseja criar mesmo assim?</strong>
+            </Text>
+          ),
+          labels: { confirm: 'Sim, criar mesmo assim', cancel: 'Cancelar' },
+          confirmProps: { color: 'orange' },
+          onConfirm: () => handleTransferSubmit(true), // Chamar novamente com force=true
+        });
       } else {
         throw new Error('Erro ao criar transferência');
       }
-    } catch {
+    } catch (error) {
       notifications.show({
         title: 'Erro',
         message: 'Não foi possível criar a transferência',
@@ -375,8 +458,133 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     }
   };
 
+  const handleCreateClassification = async () => {
+    if (!newClassificationName.trim()) {
+      notifications.show({
+        title: 'Erro',
+        message: 'Digite o nome da classificação',
+        color: 'red',
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/financial-controls/${controlId}/classifications`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: newClassificationName,
+            description: newClassificationDescription || null,
+            isActive: true,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const newClassification = await response.json();
+        notifications.show({
+          title: 'Sucesso',
+          message: `Classificação "${newClassificationName}" criada`,
+          color: 'green',
+        });
+        setNewClassificationModalOpened(false);
+        setNewClassificationName('');
+        setNewClassificationDescription('');
+        await loadClassifications();
+        // Selecionar a classificação recém-criada
+        setNewAccountForm({ ...newAccountForm, classificationId: newClassification.id });
+      } else {
+        throw new Error('Erro ao criar classificação');
+      }
+    } catch {
+      notifications.show({
+        title: 'Erro',
+        message: 'Não foi possível criar a classificação',
+        color: 'red',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateAccount = async () => {
+    if (!newAccountForm.name) {
+      notifications.show({
+        title: 'Erro',
+        message: 'Digite o nome da conta',
+        color: 'red',
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/financial-controls/${controlId}/expense-income-accounts`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newAccountForm),
+        }
+      );
+
+      if (response.ok) {
+        const newAccount = await response.json();
+        notifications.show({
+          title: 'Sucesso',
+          message: `Conta "${newAccountForm.name}" criada`,
+          color: 'green',
+        });
+        setAddAccountModalOpened(false);
+        const createdAccountName = newAccountForm.name;
+        const createdAccountType = newAccountForm.type;
+        setNewAccountForm({ name: '', type: 'expense', classificationId: null, description: '' });
+        await loadAccounts();
+        // Selecionar a conta recém-criada e preencher name e type
+        setTransactionForm({ 
+          ...transactionForm, 
+          accountId: newAccount.id,
+          name: createdAccountName,
+          type: createdAccountType
+        });
+      } else {
+        throw new Error('Erro ao criar conta');
+      }
+    } catch {
+      notifications.show({
+        title: 'Erro',
+        message: 'Não foi possível criar a conta',
+        color: 'red',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleEditTransaction = async () => {
     if (!selectedTransaction) return;
+
+    // Validar forma de pagamento
+    if (editTransactionForm.paymentMethod === 'bank_account' && !editTransactionForm.bankAccountId) {
+      notifications.show({
+        title: 'Erro',
+        message: 'Selecione uma conta bancária',
+        color: 'red',
+      });
+      return;
+    }
+
+    if (editTransactionForm.paymentMethod === 'credit_card' && !editTransactionForm.cardId) {
+      notifications.show({
+        title: 'Erro',
+        message: 'Selecione um cartão de crédito',
+        color: 'red',
+      });
+      return;
+    }
 
     setLoading(true);
     try {
@@ -392,6 +600,9 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             paidDate: editTransactionForm.paidDate 
               ? dayjs(editTransactionForm.paidDate).format('YYYY-MM-DD')
               : null,
+            paymentMethod: editTransactionForm.paymentMethod,
+            bankAccountId: editTransactionForm.paymentMethod === 'bank_account' ? editTransactionForm.bankAccountId : null,
+            cardId: editTransactionForm.paymentMethod === 'credit_card' ? editTransactionForm.cardId : null,
           }),
         }
       );
@@ -461,6 +672,9 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
       expectedAmount: transaction.expectedAmount,
       actualAmount: transaction.actualAmount || '',
       paidDate: transaction.paidDate ? new Date(transaction.paidDate) : null,
+      paymentMethod: transaction.paymentMethod,
+      bankAccountId: transaction.bankAccountId || '',
+      cardId: transaction.cardId || '',
     });
     setEditTransactionModalOpened(true);
   };
@@ -719,7 +933,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
       {/* Tabs para separar Transações, Transferências e Faturas */}
       <Tabs defaultValue="transactions">
         <Tabs.List mb="md">
-          <Tabs.Tab value="transactions">Transações</Tabs.Tab>
+          <Tabs.Tab value="transactions">Contas do Mês</Tabs.Tab>
           <Tabs.Tab value="transfers">Transferências</Tabs.Tab>
           <Tabs.Tab value="invoices" leftSection={<IconCreditCard size={16} />}>
             Faturas de Cartão
@@ -771,7 +985,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
                       </Table.Td>
                     </Table.Tr>
                   ))
-                ) : transactions.length === 0 ? (
+                ) : transactions.filter(t => t.paymentMethod !== 'credit_card').length === 0 ? (
                   <Table.Tr>
                     <Table.Td colSpan={7} style={{ textAlign: 'center', padding: 32 }}>
                       <Text c="dimmed">Nenhuma transação neste mês</Text>
@@ -779,6 +993,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
                   </Table.Tr>
                 ) : (
                   transactions
+                    .filter(transaction => transaction.paymentMethod !== 'credit_card') // Não mostrar transações de cartão aqui
                     .sort((a, b) => {
                       const dateA = a.paidDate || '9999-12-31';
                       const dateB = b.paidDate || '9999-12-31';
@@ -1020,7 +1235,14 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
                         {invoice.dueDate ? dayjs(invoice.dueDate).format('DD/MM/YYYY') : '-'}
                       </Table.Td>
                       <Table.Td>
-                        <Text fw={500} c="red">R$ {parseFloat(invoice.totalAmount).toFixed(2)}</Text>
+                        <div>
+                          <Text fw={500} c="red">R$ {parseFloat(invoice.actualTotal || '0').toFixed(2)}</Text>
+                          {invoice.hasPendingTransactions && (
+                            <Text size="xs" c="orange">
+                              ⚠ Aguardando confirmação
+                            </Text>
+                          )}
+                        </div>
                       </Table.Td>
                       <Table.Td>
                         <Badge variant="light">{invoice.transactionCount} lançamentos</Badge>
@@ -1160,24 +1382,35 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         size="lg"
       >
         <Stack>
-          <TextInput
-            label="Descrição"
-            placeholder="Ex: Conta de luz"
-            value={transactionForm.name}
-            onChange={(e) => setTransactionForm({ ...transactionForm, name: e.target.value })}
-            required
-          />
-
-          <Select
-            label="Tipo"
-            value={transactionForm.type}
-            onChange={(value) => setTransactionForm({ ...transactionForm, type: value as 'income' | 'expense' })}
-            data={[
-              { value: 'expense', label: 'Despesa' },
-              { value: 'income', label: 'Receita' },
-            ]}
-            required
-          />
+          <Group align="flex-end" gap="xs">
+            <Select
+              label="Conta"
+              placeholder="Selecione a conta (ex: Luz, Água, Gasolina)"
+              value={transactionForm.accountId}
+              onChange={(value) => {
+                const account = accounts.find(acc => acc.id === value);
+                setTransactionForm({ 
+                  ...transactionForm, 
+                  accountId: value || '',
+                  name: account?.name || '',
+                  type: account?.type || 'expense'
+                });
+              }}
+              data={accounts.map((acc) => ({
+                value: acc.id,
+                label: `${acc.name} (${acc.type === 'income' ? 'Receita' : 'Despesa'})`,
+              }))}
+              searchable
+              required
+              style={{ flex: 1 }}
+            />
+            <Button
+              onClick={() => setAddAccountModalOpened(true)}
+              variant="default"
+            >
+              <IconPlus size={16} />
+            </Button>
+          </Group>
 
           <NumberInput
             label="Valor"
@@ -1258,27 +1491,39 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         size="lg"
       >
         <Stack>
-          <Select
+          <Autocomplete
             label="Conta de Origem"
-            placeholder="Selecione a conta de origem"
-            value={transferForm.fromBankAccountId}
-            onChange={(value) => setTransferForm({ ...transferForm, fromBankAccountId: value || '' })}
-            data={bankAccounts.map((acc) => ({
-              value: acc.id,
-              label: `${acc.name} - ${acc.bankName}`,
-            }))}
+            placeholder="Digite o nome da conta ou banco"
+            value={transferForm.fromName}
+            onChange={(value) => {
+              const account = bankAccounts.find(acc => `${acc.name} - ${acc.bankName}` === value);
+              setTransferForm({ 
+                ...transferForm, 
+                fromName: value,
+                fromBankAccountId: account?.id || '' 
+              });
+            }}
+            data={bankAccounts.map((acc) => `${acc.name} - ${acc.bankName}`)}
+            limit={10}
+            maxDropdownHeight={200}
             required
           />
 
-          <Select
+          <Autocomplete
             label="Conta de Destino"
-            placeholder="Selecione a conta de destino"
-            value={transferForm.toBankAccountId}
-            onChange={(value) => setTransferForm({ ...transferForm, toBankAccountId: value || '' })}
-            data={bankAccounts.map((acc) => ({
-              value: acc.id,
-              label: `${acc.name} - ${acc.bankName}`,
-            }))}
+            placeholder="Digite o nome da conta ou banco"
+            value={transferForm.toName}
+            onChange={(value) => {
+              const account = bankAccounts.find(acc => `${acc.name} - ${acc.bankName}` === value);
+              setTransferForm({ 
+                ...transferForm, 
+                toName: value,
+                toBankAccountId: account?.id || '' 
+              });
+            }}
+            data={bankAccounts.map((acc) => `${acc.name} - ${acc.bankName}`)}
+            limit={10}
+            maxDropdownHeight={200}
             required
           />
 
@@ -1313,7 +1558,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             <Button variant="default" onClick={() => setTransferModalOpened(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleTransferSubmit} loading={loading}>
+            <Button onClick={() => handleTransferSubmit()} loading={loading}>
               Salvar
             </Button>
           </Group>
@@ -1417,6 +1662,48 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             onChange={(value) => setEditTransactionForm({ ...editTransactionForm, actualAmount: String(value) })}
           />
 
+          <Select
+            label="Forma de Pagamento"
+            value={editTransactionForm.paymentMethod}
+            onChange={(value) => setEditTransactionForm({ ...editTransactionForm, paymentMethod: value || 'bank_account', bankAccountId: '', cardId: '' })}
+            data={[
+              { value: 'bank_account', label: 'Conta Bancária' },
+              { value: 'credit_card', label: 'Cartão de Crédito' },
+              { value: 'cash', label: 'Dinheiro' },
+            ]}
+            required
+          />
+
+          {editTransactionForm.paymentMethod === 'bank_account' && (
+            <Select
+              label="Conta Bancária"
+              placeholder="Selecione uma conta"
+              value={editTransactionForm.bankAccountId}
+              onChange={(value) => setEditTransactionForm({ ...editTransactionForm, bankAccountId: value || '' })}
+              data={bankAccounts.map((acc) => ({
+                value: acc.id,
+                label: `${acc.name} - ${acc.bankName}`,
+              }))}
+              searchable
+              required
+            />
+          )}
+
+          {editTransactionForm.paymentMethod === 'credit_card' && (
+            <Select
+              label="Cartão de Crédito"
+              placeholder="Selecione um cartão"
+              value={editTransactionForm.cardId}
+              onChange={(value) => setEditTransactionForm({ ...editTransactionForm, cardId: value || '' })}
+              data={cards.map((card) => ({
+                value: card.id,
+                label: card.name,
+              }))}
+              searchable
+              required
+            />
+          )}
+
           <DateInput
             label="Data de Pagamento"
             placeholder="Deixe em branco se ainda não foi pago"
@@ -1442,6 +1729,120 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         </Stack>
       </Modal>
 
+      {/* Modal: Criar Nova Conta */}
+      <Modal
+        opened={addAccountModalOpened}
+        onClose={() => setAddAccountModalOpened(false)}
+        title="Criar Nova Conta"
+      >
+        <Stack>
+          <TextInput
+            label="Nome da Conta"
+            placeholder="Ex: Luz, Água, Gasolina, Netflix"
+            value={newAccountForm.name}
+            onChange={(e) => setNewAccountForm({ ...newAccountForm, name: e.target.value })}
+            required
+          />
+
+          <Textarea
+            label="Observação"
+            placeholder="Descrição opcional da conta"
+            value={newAccountForm.description}
+            onChange={(e) => setNewAccountForm({ ...newAccountForm, description: e.target.value })}
+            rows={2}
+          />
+
+          <Select
+            label="Tipo"
+            value={newAccountForm.type}
+            onChange={(value) => setNewAccountForm({ ...newAccountForm, type: value as 'income' | 'expense' })}
+            data={[
+              { value: 'expense', label: 'Despesa' },
+              { value: 'income', label: 'Receita' },
+            ]}
+            required
+          />
+
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>Classificação</Text>
+            <Group gap="xs" align="flex-end">
+              <Select
+                placeholder="Selecione uma classificação (opcional)"
+                value={newAccountForm.classificationId}
+                onChange={(value) => setNewAccountForm({ ...newAccountForm, classificationId: value })}
+                data={classifications.map(c => ({ value: c.id, label: c.name }))}
+                clearable
+                searchable
+                style={{ flex: 1 }}
+              />
+              <Button
+                variant="light"
+                size="sm"
+                onClick={() => setNewClassificationModalOpened(true)}
+              >
+                +
+              </Button>
+            </Group>
+          </Stack>
+
+          <Group justify="space-between">
+            <Button variant="default" onClick={() => setAddAccountModalOpened(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleCreateAccount} loading={loading}>
+              Criar
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Modal: Nova Classificação */}
+      <Modal
+        opened={newClassificationModalOpened}
+        onClose={() => {
+          setNewClassificationModalOpened(false);
+          setNewClassificationName('');
+          setNewClassificationDescription('');
+        }}
+        title="Nova Classificação"
+        size="sm"
+      >
+        <Stack>
+          <TextInput
+            label="Nome"
+            placeholder="Ex: Moradia, Transporte, Alimentação"
+            value={newClassificationName}
+            onChange={(e) => setNewClassificationName(e.target.value)}
+            required
+            data-autofocus
+          />
+
+          <Textarea
+            label="Descrição"
+            placeholder="Descrição opcional"
+            value={newClassificationDescription}
+            onChange={(e) => setNewClassificationDescription(e.target.value)}
+            rows={3}
+          />
+
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="default"
+              onClick={() => {
+                setNewClassificationModalOpened(false);
+                setNewClassificationName('');
+                setNewClassificationDescription('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleCreateClassification} loading={loading}>
+              Criar
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
       {/* Modal: Detalhes da Fatura */}
       {selectedInvoice && (
         <InvoiceDetails
@@ -1451,11 +1852,13 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
             setSelectedInvoice(null);
           }}
           invoiceId={selectedInvoice.id}
+          cardId={selectedInvoice.cardId}
           cardName={selectedInvoice.cardName}
           totalAmount={selectedInvoice.totalAmount}
           dueDate={selectedInvoice.dueDate}
           isPaid={selectedInvoice.isPaid}
           paidDate={selectedInvoice.paidDate}
+          bankAccountId={selectedInvoice.bankAccountId}
           controlId={controlId}
           onUpdate={() => {
             loadAllData();

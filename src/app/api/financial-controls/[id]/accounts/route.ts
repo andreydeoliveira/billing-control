@@ -142,7 +142,7 @@ export async function POST(
         name,
         description: description || null,
         type,
-        color: color || null,
+        classificationId: body.classificationId || null,
         icon: icon || null,
         isActive: true,
       })

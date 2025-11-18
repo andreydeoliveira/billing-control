@@ -64,7 +64,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, description, type, color, icon, isActive } = body;
+    const { name, description, type, classificationId, icon, isActive } = body;
 
     if (type && !['expense', 'income'].includes(type)) {
       return NextResponse.json(
@@ -80,7 +80,7 @@ export async function PUT(
         name: name || existingAccount[0].name,
         description: description !== undefined ? description : existingAccount[0].description,
         type: type || existingAccount[0].type,
-        color: color !== undefined ? color : existingAccount[0].color,
+        classificationId: classificationId !== undefined ? classificationId : existingAccount[0].classificationId,
         icon: icon !== undefined ? icon : existingAccount[0].icon,
         isActive: isActive !== undefined ? isActive : existingAccount[0].isActive,
         updatedAt: new Date(),

@@ -5,3 +5,5 @@ export * from './accounts-and-cards';
 export { expenseIncomeAccounts, expenseIncomeAccountsRelations } from './accounts'; // Contas (Luz, Água, Uber, etc)
 export * from './transactions';
 export * from './monthly-transactions';
+export * from './monthly-balances';
+export * from './classifications';
