@@ -3,6 +3,7 @@ import { ColorSchemeScript, MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { ModalsProvider } from "@mantine/modals";
 import { UserProvider } from "@/contexts/UserContext";
+import { AuthSessionProvider } from "@/components/providers/SessionProvider";
 import "./globals.css";
 import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
@@ -24,14 +25,16 @@ export default function RootLayout({
         <ColorSchemeScript />
       </head>
       <body suppressHydrationWarning>
-        <MantineProvider>
-          <ModalsProvider>
-            <UserProvider>
-              <Notifications />
-              {children}
-            </UserProvider>
-          </ModalsProvider>
-        </MantineProvider>
+        <AuthSessionProvider>
+          <MantineProvider>
+            <ModalsProvider>
+              <UserProvider>
+                <Notifications />
+                {children}
+              </UserProvider>
+            </ModalsProvider>
+          </MantineProvider>
+        </AuthSessionProvider>
       </body>
     </html>
   );
