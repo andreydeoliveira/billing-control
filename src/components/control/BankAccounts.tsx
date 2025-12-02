@@ -242,9 +242,6 @@ export function BankAccounts({ controlId, onOpenBoxes }: BankAccountsProps) {
         <Button leftSection={<IconPlus size={16} />} onClick={openCreateModal}>
           Nova Conta
         </Button>
-        <Button variant="light" onClick={loadAccounts}>
-          Recarregar
-        </Button>
       </Group>
 
       <Paper shadow="xs" p="md">

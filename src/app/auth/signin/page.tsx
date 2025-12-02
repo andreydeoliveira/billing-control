@@ -43,9 +43,16 @@ export default function SignInPage() {
         });
         setUser(data.user);
         
-        // Verificar quantos controles o usuário tem
+        // Verificar quantos controles o usuário tem (com timeout)
         try {
-          const controlsResponse = await fetch('/api/financial-controls');
+          const abortController = new AbortController();
+          const timeoutId = setTimeout(() => abortController.abort(), 5000); // 5s timeout
+          
+          const controlsResponse = await fetch('/api/financial-controls', {
+            signal: abortController.signal,
+          });
+          clearTimeout(timeoutId);
+          
           if (controlsResponse.ok) {
             const controlsData = await controlsResponse.json();
             
@@ -59,7 +66,9 @@ export default function SignInPage() {
           } else {
             router.push('/dashboard');
           }
-        } catch {
+        } catch (err) {
+          // Se falhar, só vai pro dashboard mesmo (sem erro)
+          console.warn('Erro ao buscar controles:', err);
           router.push('/dashboard');
         }
       } else {
