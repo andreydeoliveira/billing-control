@@ -3,7 +3,9 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema';
 
-config({ path: '.env' }); // or .env.local
+// Load .env.local first (dev override), then .env (fallback)
+config({ path: '.env.local' });
+config({ path: '.env' });
 
 // Prioriza POSTGRES_URL_NON_POOLING (Vercel) → POSTGRES_URL
 const dbUrl =
