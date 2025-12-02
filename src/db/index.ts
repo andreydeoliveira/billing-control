@@ -5,5 +5,16 @@ import * as schema from './schema';
 
 config({ path: '.env' }); // or .env.local
 
-const client = postgres(process.env.DATABASE_URL!);
+// Prioriza POSTGRES_URL_NON_POOLING (Vercel) → POSTGRES_URL
+const dbUrl =
+  process.env.POSTGRES_URL_NON_POOLING ||
+  process.env.POSTGRES_URL;
+
+if (!dbUrl) {
+  throw new Error(
+    'No database URL found. Set POSTGRES_URL_NON_POOLING or POSTGRES_URL.'
+  );
+}
+
+const client = postgres(dbUrl);
 export const db = drizzle({ client, schema });
