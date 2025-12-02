@@ -1,11 +1,12 @@
+import { config } from 'dotenv';
 import { defineConfig } from 'drizzle-kit';
-import * as dotenv from 'dotenv';
 
-// Tenta carregar variáveis de .env.local; se não existir, faz fallback para .env
-const local = dotenv.config({ path: '.env.local' });
-if (local.error) {
-  dotenv.config({ path: '.env' });
-}
+// Load .env.local first, then .env as fallback
+config({ path: '.env.local' });
+config({ path: '.env' });
+
+// Desabilita verificação de certificado autoassinado para Supabase
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 export default defineConfig({
   schema: './src/db/schema/index.ts',
@@ -13,5 +14,6 @@ export default defineConfig({
   dialect: 'postgresql',
   dbCredentials: {
     url: process.env.DATABASE_URL!,
+    ssl: true,
   },
 });
