@@ -130,6 +130,8 @@ export async function GET(
         const transfersList: Array<{ direction: 'in' | 'out'; amount: number }> = [];
 
         provisioned.forEach((pt) => {
+          // Se não encontrou tipo (join não bateu), ignorar para evitar erro de tipo
+          if (!pt.type) return;
           // Se houver bankAccountId diferente, ignorar; se não houver, considerar na projeção agregada desta conta (regra simples)
           if (pt.bankAccountId && pt.bankAccountId !== acc.id) return;
           // Se estiver vinculado a caixinha desta conta, incluir
@@ -169,6 +171,8 @@ export async function GET(
               )
             );
           txsPaid.forEach(t => {
+            // Ignorar transações sem tipo (join não encontrou conta associada)
+            if (!t.type) return;
             const amt = parseFloat(t.amount || '0');
             paidTxList.push({ name: (t as any).name || 'Transação', type: t.type, amount: amt });
           });
