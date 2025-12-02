@@ -149,7 +149,7 @@ export default function ControlPage() {
               >
                 Membros do Controle
               </Menu.Item>
-              {session?.user && (session.user as any).role === 'admin' && (
+              {session?.user?.role === 'admin' && (
                 <Menu.Item
                   leftSection={<IconUsers style={{ width: rem(16), height: rem(16) }} />}
                   onClick={() => router.push('/admin/users')}
