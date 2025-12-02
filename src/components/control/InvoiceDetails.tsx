@@ -56,6 +56,7 @@ interface BankAccount {
   id: string;
   name: string;
   bankName: string;
+  isActive?: boolean;
 }
 
 interface ExpenseIncomeAccount {
@@ -150,7 +151,8 @@ export function InvoiceDetails({
       const response = await fetch(`/api/financial-controls/${controlId}/bank-accounts`);
       if (response.ok) {
         const data = await response.json();
-        setBankAccounts(data);
+        const activeOnly = Array.isArray(data) ? data.filter((acc: any) => acc.isActive !== false) : [];
+        setBankAccounts(activeOnly);
       }
     } catch (error) {
       console.error('Erro ao carregar contas:', error);

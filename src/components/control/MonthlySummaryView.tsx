@@ -22,7 +22,8 @@ interface MonthlySummaryData {
   classificationId?: string | null;
   classificationName?: string | null;
   monthYear: string;
-  total: number;
+  total: number; // realizado (actual)
+  expectedTotal?: number; // previsto (expected)
 }
 
 interface MonthlySummaryViewProps {
@@ -80,13 +81,15 @@ export function MonthlySummaryView({ controlId }: MonthlySummaryViewProps) {
       acc[key] = {
         name: key,
         type: item.accountType,
-        months: {},
+        months: {}, // realizado
+        expectedMonths: {}, // previsto
       };
     }
 
     acc[key].months[item.monthYear] = Number(item.total) || 0;
+    acc[key].expectedMonths[item.monthYear] = Number(item.expectedTotal || 0) || 0;
     return acc;
-  }, {} as Record<string, { name: string; type?: string; months: Record<string, number> }>);
+  }, {} as Record<string, { name: string; type?: string; months: Record<string, number>; expectedMonths: Record<string, number> }>);
 
   const rows = Object.values(groupedData);
 
@@ -143,9 +146,8 @@ export function MonthlySummaryView({ controlId }: MonthlySummaryViewProps) {
                     </Table.Tr>
                   ) : (
                     rows.map((row) => {
-                      const yearTotal = months.reduce((sum, month) => {
-                        return sum + (row.months[`${year}-${month}`] || 0);
-                      }, 0);
+                      const yearActual = months.reduce((sum, month) => sum + (row.months[`${year}-${month}`] || 0), 0);
+                      const yearExpected = months.reduce((sum, month) => sum + (row.expectedMonths[`${year}-${month}`] || 0), 0);
 
                       return (
                         <Table.Tr key={row.name}>
@@ -158,15 +160,25 @@ export function MonthlySummaryView({ controlId }: MonthlySummaryViewProps) {
                             ) : null}
                           </Table.Td>
                           {months.map((month) => {
-                            const value = row.months[`${year}-${month}`] || 0;
+                            const actual = row.months[`${year}-${month}`] || 0;
+                            const expected = row.expectedMonths[`${year}-${month}`] || 0;
+                            const show = expected > 0 || actual > 0;
                             return (
                               <Table.Td key={month} style={{ textAlign: 'right' }}>
-                                {value > 0 ? `R$ ${value.toFixed(2)}` : '-'}
+                                {show ? (
+                                  <div>
+                                    <Text size="sm">R$ {expected.toFixed(2)} <Text span c="dimmed">(prev)</Text></Text>
+                                    <Text size="sm" fw={600}>R$ {actual.toFixed(2)} <Text span c="dimmed">(real)</Text></Text>
+                                  </div>
+                                ) : ('-')}
                               </Table.Td>
                             );
                           })}
                           <Table.Td style={{ textAlign: 'right', fontWeight: 'bold' }}>
-                            R$ {yearTotal.toFixed(2)}
+                            <div>
+                              <Text size="sm">R$ {yearExpected.toFixed(2)} <Text span c="dimmed">(prev)</Text></Text>
+                              <Text size="sm" fw={700}>R$ {yearActual.toFixed(2)} <Text span c="dimmed">(real)</Text></Text>
+                            </div>
                           </Table.Td>
                         </Table.Tr>
                       );
@@ -206,9 +218,8 @@ export function MonthlySummaryView({ controlId }: MonthlySummaryViewProps) {
                     </Table.Tr>
                   ) : (
                     rows.map((row) => {
-                      const yearTotal = months.reduce((sum, month) => {
-                        return sum + (row.months[`${year}-${month}`] || 0);
-                      }, 0);
+                      const yearActual = months.reduce((sum, month) => sum + (row.months[`${year}-${month}`] || 0), 0);
+                      const yearExpected = months.reduce((sum, month) => sum + (row.expectedMonths[`${year}-${month}`] || 0), 0);
 
                       return (
                         <Table.Tr key={row.name}>
@@ -219,15 +230,25 @@ export function MonthlySummaryView({ controlId }: MonthlySummaryViewProps) {
                             )}
                           </Table.Td>
                           {months.map((month) => {
-                            const value = row.months[`${year}-${month}`] || 0;
+                            const actual = row.months[`${year}-${month}`] || 0;
+                            const expected = row.expectedMonths[`${year}-${month}`] || 0;
+                            const show = expected > 0 || actual > 0;
                             return (
                               <Table.Td key={month} style={{ textAlign: 'right' }}>
-                                {value > 0 ? `R$ ${value.toFixed(2)}` : '-'}
+                                {show ? (
+                                  <div>
+                                    <Text size="sm">R$ {expected.toFixed(2)} <Text span c="dimmed">(prev)</Text></Text>
+                                    <Text size="sm" fw={600}>R$ {actual.toFixed(2)} <Text span c="dimmed">(real)</Text></Text>
+                                  </div>
+                                ) : ('-')}
                               </Table.Td>
                             );
                           })}
                           <Table.Td style={{ textAlign: 'right', fontWeight: 'bold' }}>
-                            R$ {yearTotal.toFixed(2)}
+                            <div>
+                              <Text size="sm">R$ {yearExpected.toFixed(2)} <Text span c="dimmed">(prev)</Text></Text>
+                              <Text size="sm" fw={700}>R$ {yearActual.toFixed(2)} <Text span c="dimmed">(real)</Text></Text>
+                            </div>
                           </Table.Td>
                         </Table.Tr>
                       );

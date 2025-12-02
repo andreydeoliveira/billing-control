@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, uuid, numeric, integer, boolean, date } from 'drizzle-orm/pg-core';
 import { financialControls } from './financial-controls';
-import { bankAccounts, cards } from './accounts-and-cards';
+import { bankAccounts, cards, bankAccountBoxes } from './accounts-and-cards';
 import { expenseIncomeAccounts } from './accounts';
 
 // Gastos/Recebimentos provisionados (modelo/template)
@@ -20,6 +20,7 @@ export const provisionedTransactions = pgTable('provisioned_transactions', {
   // Fonte de pagamento (OPCIONAL: pode ser null = conta a pagar, ou conta bancária, ou cartão)
   bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id, { onDelete: 'set null' }),
   cardId: uuid('card_id').references(() => cards.id, { onDelete: 'set null' }),
+  boxId: uuid('box_id').references(() => bankAccountBoxes.id, { onDelete: 'set null' }), // caixinha padrão
   
   // Recorrência
   isRecurring: boolean('is_recurring').notNull().default(false),

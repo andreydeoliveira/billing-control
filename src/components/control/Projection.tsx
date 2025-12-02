@@ -27,7 +27,7 @@ interface MonthData {
   expectedIncome: number;
   expectedExpenses: number;
   finalBalance: number;
-  transactions: {
+    transactions: {
     name: string;
     type: string;
     amount: number;
@@ -35,6 +35,18 @@ interface MonthData {
     installments: number | null;
     currentInstallment: number | null;
   }[];
+    breakdown?: {
+      provisioned: {
+        name: string;
+        type: string;
+        amount: number;
+        isRecurring: boolean;
+        installments: number | null;
+        currentInstallment: number | null;
+      }[];
+      paidTransactions: { name: string; type: string; amount: number }[];
+      transfers: { direction: 'in' | 'out'; amount: number }[];
+    };
 }
 
 interface AccountProjection {
@@ -68,6 +80,18 @@ interface DetailModalData {
     installments: number | null;
     currentInstallment: number | null;
   }[];
+  breakdown?: {
+    provisioned: {
+      name: string;
+      type: string;
+      amount: number;
+      isRecurring: boolean;
+      installments: number | null;
+      currentInstallment: number | null;
+    }[];
+    paidTransactions: { name: string; type: string; amount: number }[];
+    transfers: { direction: 'in' | 'out'; amount: number }[];
+  };
 }
 
 export function Projection({ controlId }: ProjectionProps) {
@@ -104,6 +128,7 @@ export function Projection({ controlId }: ProjectionProps) {
       expectedExpenses: monthData.expectedExpenses,
       finalBalance: monthData.finalBalance,
       transactions: monthData.transactions,
+      breakdown: monthData.breakdown,
     });
   };
 
@@ -227,6 +252,40 @@ export function Projection({ controlId }: ProjectionProps) {
                         c={transaction.type === 'income' ? 'teal' : 'red'}
                       >
                         {transaction.type === 'income' ? '+' : '-'} {formatCurrency(transaction.amount)}
+                      </Text>
+                    </Group>
+                  ))}
+                </Stack>
+              </Paper>
+            )}
+
+            {/* Transações Pagas no mês (apenas mês atual) */}
+            {detailModal.breakdown && detailModal.breakdown.paidTransactions && detailModal.breakdown.paidTransactions.length > 0 && (
+              <Paper p="md" withBorder>
+                <Text size="sm" fw={600} mb="sm">Transações Pagas</Text>
+                <Stack gap="xs">
+                  {detailModal.breakdown.paidTransactions.map((tx, idx) => (
+                    <Group key={idx} justify="space-between" p="xs" style={{ borderRadius: 4, backgroundColor: 'var(--mantine-color-gray-0)' }}>
+                      <Text size="sm" fw={500}>{tx.name}</Text>
+                      <Text size="sm" fw={700} c={tx.type === 'income' ? 'teal' : 'red'}>
+                        {tx.type === 'income' ? '+' : '-'} {formatCurrency(tx.amount)}
+                      </Text>
+                    </Group>
+                  ))}
+                </Stack>
+              </Paper>
+            )}
+
+            {/* Transferências no mês (apenas mês atual) */}
+            {detailModal.breakdown && detailModal.breakdown.transfers && detailModal.breakdown.transfers.length > 0 && (
+              <Paper p="md" withBorder>
+                <Text size="sm" fw={600} mb="sm">Transferências</Text>
+                <Stack gap="xs">
+                  {detailModal.breakdown.transfers.map((tr, idx) => (
+                    <Group key={idx} justify="space-between" p="xs" style={{ borderRadius: 4, backgroundColor: 'var(--mantine-color-gray-0)' }}>
+                      <Text size="sm" fw={500}>{tr.direction === 'in' ? 'Entrada' : 'Saída'}</Text>
+                      <Text size="sm" fw={700} c={tr.direction === 'in' ? 'teal' : 'red'}>
+                        {tr.direction === 'in' ? '+' : '-'} {formatCurrency(tr.amount)}
                       </Text>
                     </Group>
                   ))}

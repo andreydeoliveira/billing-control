@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, uuid, numeric, integer, date, boolean } from 'drizzle-orm/pg-core';
 import { financialControls } from './financial-controls';
-import { bankAccounts, cards } from './accounts-and-cards';
+import { bankAccounts, cards, bankAccountBoxes } from './accounts-and-cards';
 import { provisionedTransactions } from './transactions';
 import { expenseIncomeAccounts } from './accounts';
 
@@ -10,6 +10,8 @@ export const transfers = pgTable('transfers', {
   financialControlId: uuid('financial_control_id').notNull().references(() => financialControls.id, { onDelete: 'cascade' }),
   fromBankAccountId: uuid('from_bank_account_id').notNull().references(() => bankAccounts.id, { onDelete: 'cascade' }),
   toBankAccountId: uuid('to_bank_account_id').notNull().references(() => bankAccounts.id, { onDelete: 'cascade' }),
+  fromBoxId: uuid('from_box_id').references(() => bankAccountBoxes.id, { onDelete: 'set null' }), // caixinha de origem
+  toBoxId: uuid('to_box_id').references(() => bankAccountBoxes.id, { onDelete: 'set null' }), // caixinha de destino
   amount: numeric('amount', { precision: 15, scale: 2 }).notNull(),
   monthYear: text('month_year').notNull(), // formato: 'YYYY-MM'
   transferDate: date('transfer_date').notNull(),
@@ -60,6 +62,7 @@ export const monthlyTransactions = pgTable('monthly_transactions', {
   paymentMethod: text('payment_method').notNull(), // 'credit_card', 'debit_card', 'bank_account', 'cash', 'transfer'
   bankAccountId: uuid('bank_account_id').references(() => bankAccounts.id, { onDelete: 'set null' }),
   cardId: uuid('card_id').references(() => cards.id, { onDelete: 'set null' }),
+  boxId: uuid('box_id').references(() => bankAccountBoxes.id, { onDelete: 'set null' }), // caixinha afetada
   
   // Parcelas
   installmentNumber: integer('installment_number'),

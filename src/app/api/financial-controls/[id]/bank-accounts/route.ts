@@ -33,14 +33,16 @@ export async function GET(
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
-    // Buscar contas bancárias
-    const accounts = await db
+    // Buscar contas bancárias (pode haver duplicadas inseridas anteriormente)
+    const rawAccounts = await db
       .select()
       .from(bankAccounts)
       .where(eq(bankAccounts.financialControlId, controlId))
       .orderBy(bankAccounts.createdAt);
 
-    return NextResponse.json(accounts);
+    // Retornar todas as contas (inclusive duplicadas por name+bank),
+    // permitindo que o cliente aplique filtros (ativas/inativas) conforme desejado.
+    return NextResponse.json(rawAccounts);
   } catch (error) {
     console.error('Erro ao buscar contas:', error);
     return NextResponse.json(
@@ -87,8 +89,7 @@ export async function POST(
         financialControlId: controlId,
         name: body.name,
         bankName: body.bankName,
-        initialBalance: body.initialBalance,
-        trackBalance: body.trackBalance || false,
+        initialBalance: body.initialBalance ?? '0',
       })
       .returning();
 
@@ -149,15 +150,18 @@ export async function PUT(
     }
 
     // Atualizar conta bancária
+    const updateValues: any = {
+      name: body.name,
+      bankName: body.bankName,
+      updatedAt: new Date(),
+    };
+    if (body.initialBalance !== undefined && body.initialBalance !== null) {
+      updateValues.initialBalance = body.initialBalance;
+    }
+
     const [account] = await db
       .update(bankAccounts)
-      .set({
-        name: body.name,
-        bankName: body.bankName,
-        initialBalance: body.initialBalance,
-        trackBalance: body.trackBalance,
-        updatedAt: new Date(),
-      })
+      .set(updateValues)
       .where(eq(bankAccounts.id, body.id))
       .returning();
 

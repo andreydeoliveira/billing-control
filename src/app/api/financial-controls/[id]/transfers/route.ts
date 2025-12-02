@@ -114,8 +114,16 @@ export async function POST(
       return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 });
     }
 
+    // Permitir mesma conta quando o movimento é entre caixinha e saldo livre
+    // Casos permitidos com mesma conta:
+    // - Resgate: fromBoxId definido e toBoxId nulo
+    // - Aporte para caixinha: toBoxId definido e fromBoxId nulo
     if (body.fromBankAccountId === body.toBankAccountId) {
-      return NextResponse.json({ error: 'Contas de origem e destino devem ser diferentes' }, { status: 400 });
+      const isRescueFromBox = !!body.fromBoxId && !body.toBoxId;
+      const isDepositToBox = !!body.toBoxId && !body.fromBoxId;
+      if (!isRescueFromBox && !isDepositToBox) {
+        return NextResponse.json({ error: 'Contas de origem e destino devem ser diferentes' }, { status: 400 });
+      }
     }
 
     // Se force=true, pular validações de duplicação
@@ -170,6 +178,8 @@ export async function POST(
         financialControlId: controlId,
         fromBankAccountId: body.fromBankAccountId,
         toBankAccountId: body.toBankAccountId,
+        fromBoxId: body.fromBoxId || null,
+        toBoxId: body.toBoxId || null,
         amount: body.amount,
         monthYear: body.monthYear,
         transferDate: body.transferDate,
