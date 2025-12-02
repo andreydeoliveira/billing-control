@@ -40,11 +40,11 @@
     "@types/pg": "^8.15.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "drizzle-kit": "^0.31.6",
+    "baseline-browser-mapping": "latest",
+    "drizzle-kit": "^0.31.7",
     "eslint": "^9",
     "eslint-config-next": "16.0.1",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "baseline-browser-mapping": "latest"
+    "typescript": "^5"
   }
 }
