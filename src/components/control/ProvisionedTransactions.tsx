@@ -48,6 +48,7 @@ interface BankAccount {
   id: string;
   name: string;
   bankName: string;
+  isActive?: boolean;
 }
 
 interface Card {
@@ -90,6 +91,18 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     startMonth: '',
     endMonth: '',
   });
+  const [editStrategy, setEditStrategy] = useState<'all' | 'future' | 'period'>('future');
+  const [editPeriod, setEditPeriod] = useState({
+    startMonth: '',
+    endMonth: '',
+  });
+  const [editInfo, setEditInfo] = useState<{
+    hasRelatedTransactions: boolean;
+    totalTransactions: number;
+    paidTransactions: number;
+    unpaidTransactions: number;
+  } | null>(null);
+  const [editStrategyModalOpened, setEditStrategyModalOpened] = useState(false);
   const [generateFutureModalOpened, setGenerateFutureModalOpened] = useState(false);
   const [targetYear, setTargetYear] = useState<string>('2027');
   const [selectedTransaction, setSelectedTransaction] = useState<ProvisionedTransaction | null>(null);
@@ -153,7 +166,11 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       const response = await fetch(`/api/financial-controls/${controlId}/bank-accounts`);
       if (response.ok) {
         const data = await response.json();
-        setBankAccounts(data);
+        // Apenas contas ativas para seleção em provisionados
+        const activeAccounts = Array.isArray(data)
+          ? data.filter((acc: any) => acc.isActive !== false)
+          : [];
+        setBankAccounts(activeAccounts);
       }
     } catch (error) {
       console.error('Erro ao carregar contas:', error);
@@ -500,7 +517,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
     }
   };
 
-  const openEditModal = (transaction: ProvisionedTransaction) => {
+  const openEditModal = async (transaction: ProvisionedTransaction) => {
     setSelectedTransaction(transaction);
     
     // Determinar paymentSource: none se não tem nem banco nem cartão, bank_account se tem banco, card se tem cartão
@@ -524,6 +541,30 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       startDate: transaction.startDate ? new Date(transaction.startDate) : null,
       endDate: transaction.endDate ? new Date(transaction.endDate) : null,
     });
+
+    // Verificar se tem transações vinculadas
+    setPageLoading(true);
+    try {
+      const response = await fetch(
+        `/api/financial-controls/${controlId}/provisioned-transactions/${transaction.id}?strategy=check`
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setEditInfo(data);
+        
+        if (data.hasRelatedTransactions) {
+          // Resetar estratégia para padrão
+          setEditStrategy('future');
+          setEditPeriod({ startMonth: '', endMonth: '' });
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao verificar transações:', error);
+    } finally {
+      setPageLoading(false);
+    }
+
     setEditModalOpened(true);
   };
 
@@ -557,28 +598,46 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       return;
     }
 
+    // Se tem transações vinculadas, abrir modal de estratégia
+    if (editInfo && editInfo.hasRelatedTransactions) {
+      setEditStrategyModalOpened(true);
+    } else {
+      // Sem transações vinculadas, atualizar direto
+      await confirmEdit(null);
+    }
+  };
+
+  const confirmEdit = async (strategy: 'all' | 'future' | 'period' | null) => {
+    if (!selectedTransaction) return;
+
     setLoading(true);
     try {
-      const response = await fetch(
-        `/api/financial-controls/${controlId}/provisioned-transactions/${selectedTransaction.id}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            accountId: editFormData.accountId,
-            observation: editFormData.observation || null,
-            expectedAmount: editFormData.expectedAmount,
-            bankAccountId: editFormData.paymentSource === 'bank_account' ? editFormData.bankAccountId : null,
-            cardId: editFormData.paymentSource === 'card' ? editFormData.cardId : null,
-            paymentSource: editFormData.paymentSource, // Enviar para o backend saber qual limpar
-            isRecurring: editFormData.isRecurring,
-            recurrenceType: editFormData.isRecurring ? editFormData.recurrenceType : null,
-            installments: editFormData.installments ? parseInt(editFormData.installments) : null,
-            startDate: editFormData.startDate ? editFormData.startDate.toISOString().split('T')[0] : null,
-            endDate: editFormData.endDate ? editFormData.endDate.toISOString().split('T')[0] : null,
-          }),
+      let url = `/api/financial-controls/${controlId}/provisioned-transactions/${selectedTransaction.id}`;
+      
+      if (strategy) {
+        url += `?strategy=${strategy}`;
+        if (strategy === 'period') {
+          url += `&startMonth=${editPeriod.startMonth}&endMonth=${editPeriod.endMonth}`;
         }
-      );
+      }
+
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: editFormData.accountId,
+          observation: editFormData.observation || null,
+          expectedAmount: editFormData.expectedAmount,
+          bankAccountId: editFormData.paymentSource === 'bank_account' ? editFormData.bankAccountId : null,
+          cardId: editFormData.paymentSource === 'card' ? editFormData.cardId : null,
+          paymentSource: editFormData.paymentSource,
+          isRecurring: editFormData.isRecurring,
+          recurrenceType: editFormData.isRecurring ? editFormData.recurrenceType : null,
+          installments: editFormData.installments ? parseInt(editFormData.installments) : null,
+          startDate: editFormData.startDate ? editFormData.startDate.toISOString().split('T')[0] : null,
+          endDate: editFormData.endDate ? editFormData.endDate.toISOString().split('T')[0] : null,
+        }),
+      });
 
       if (response.ok) {
         notifications.show({
@@ -587,7 +646,9 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
           color: 'green',
         });
         setEditModalOpened(false);
+        setEditStrategyModalOpened(false);
         setSelectedTransaction(null);
+        setEditInfo(null);
         loadTransactions();
       } else {
         throw new Error('Erro ao atualizar provisionado');
@@ -1284,6 +1345,86 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
               Criar
             </Button>
           </Group>
+        </Stack>
+      </Modal>
+
+      {/* Modal de Estratégia de Edição */}
+      <Modal
+        opened={editStrategyModalOpened}
+        onClose={() => {
+          setEditStrategyModalOpened(false);
+        }}
+        title="Atualizar Transações Vinculadas"
+        size="lg"
+      >
+        <Stack gap="md">
+          {editInfo && (
+            <>
+              <Text size="sm">
+                Este gasto provisionado tem <strong>{editInfo.totalTransactions} transações mensais</strong> vinculadas:
+              </Text>
+              
+              <Paper withBorder p="sm" bg="gray.0">
+                <Stack gap="xs">
+                  <Group justify="space-between">
+                    <Text size="sm" c="green">Transações pagas:</Text>
+                    <Badge color="green">{editInfo.paidTransactions}</Badge>
+                  </Group>
+                  <Group justify="space-between">
+                    <Text size="sm" c="orange">Transações não pagas:</Text>
+                    <Badge color="orange">{editInfo.unpaidTransactions}</Badge>
+                  </Group>
+                </Stack>
+              </Paper>
+
+              <Text size="sm" fw={500} mt="md">
+                Quais transações deseja atualizar?
+              </Text>
+
+              <Select
+                label="Estratégia de atualização"
+                value={editStrategy}
+                onChange={(value) => setEditStrategy(value as 'all' | 'future' | 'period')}
+                data={[
+                  { value: 'future', label: 'Apenas transações futuras (não pagas)' },
+                  { value: 'all', label: 'TODAS as transações (incluindo pagas)' },
+                  { value: 'period', label: 'Transações de um período específico' },
+                ]}
+              />
+
+              {editStrategy === 'period' && (
+                <Group grow>
+                  <TextInput
+                    label="Mês inicial"
+                    placeholder="2025-01"
+                    value={editPeriod.startMonth}
+                    onChange={(e) => setEditPeriod({ ...editPeriod, startMonth: e.target.value })}
+                  />
+                  <TextInput
+                    label="Mês final"
+                    placeholder="2025-12"
+                    value={editPeriod.endMonth}
+                    onChange={(e) => setEditPeriod({ ...editPeriod, endMonth: e.target.value })}
+                  />
+                </Group>
+              )}
+
+              <Group justify="space-between" mt="md">
+                <Button
+                  variant="default"
+                  onClick={() => setEditStrategyModalOpened(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  loading={loading}
+                  onClick={() => confirmEdit(editStrategy)}
+                >
+                  Confirmar Atualização
+                </Button>
+              </Group>
+            </>
+          )}
         </Stack>
       </Modal>
 

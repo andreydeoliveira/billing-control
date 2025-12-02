@@ -19,6 +19,7 @@ import {
   Skeleton,
   Autocomplete,
   Textarea,
+  Checkbox,
 } from '@mantine/core';
 import { IconPlus, IconEdit, IconCreditCard, IconArrowsExchange, IconTrash } from '@tabler/icons-react';
 import { DateInput } from '@mantine/dates';
@@ -43,6 +44,7 @@ interface Transaction {
   bankAccountName?: string;
   cardId?: string;
   cardName?: string;
+  boxId?: string;
   isPaid: boolean;
   isProvisioned: boolean; // Se veio de gasto provisionado
 }
@@ -81,6 +83,8 @@ interface BankAccount {
   id: string;
   name: string;
   bankName: string;
+  initialBalance?: string;
+  isActive?: boolean;
 }
 
 interface Card {
@@ -88,16 +92,25 @@ interface Card {
   name: string;
 }
 
+interface Box {
+  id: string;
+  name: string;
+  color: string;
+  currentBalance: string;
+  bankAccountId: string;
+  isActive: boolean;
+}
+
 interface AccountBalance {
   accountId: string;
-  accountName: string;
-  bankName: string;
-  initialBalance: number;
-  income: number;
-  expenses: number;
-  transfersIn: number;
-  transfersOut: number;
-  invoicePayments: number;
+  accountName?: string;
+  bankName?: string;
+  initialBalance?: number;
+  income?: number;
+  expenses?: number;
+  transfersIn?: number;
+  transfersOut?: number;
+  invoicePayments?: number;
   finalBalance: number;
 }
 
@@ -112,6 +125,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
   const [cardInvoices, setCardInvoices] = useState<CardInvoice[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
+  const [boxes, setBoxes] = useState<Box[]>([]);
   const [accountBalances, setAccountBalances] = useState<AccountBalance[]>([]);
   const [accounts, setAccounts] = useState<ExpenseIncomeAccount[]>([]);
   
@@ -119,6 +133,8 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
   const [transactionModalOpened, setTransactionModalOpened] = useState(false);
   const [editTransactionModalOpened, setEditTransactionModalOpened] = useState(false);
   const [transferModalOpened, setTransferModalOpened] = useState(false);
+  const [rescueModalOpened, setRescueModalOpened] = useState(false);
+  const [depositModalOpened, setDepositModalOpened] = useState(false);
   const [editTransferModalOpened, setEditTransferModalOpened] = useState(false);
   const [invoiceDetailsOpened, setInvoiceDetailsOpened] = useState(false);
   const [addAccountModalOpened, setAddAccountModalOpened] = useState(false);
@@ -137,7 +153,9 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     paymentMethod: 'bank_account',
     bankAccountId: '',
     cardId: '',
+    boxId: '',
     paidDate: null as Date | null,
+    autoBoxTransfer: false,
   });
 
   const [newAccountForm, setNewAccountForm] = useState({
@@ -160,6 +178,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     paymentMethod: 'bank_account' as string,
     bankAccountId: '',
     cardId: '',
+    boxId: '',
   });
 
   const [transferForm, setTransferForm] = useState({
@@ -167,6 +186,20 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     toBankAccountId: '',
     fromName: '',
     toName: '',
+    amount: '',
+    transferDate: new Date(),
+    description: '',
+  });
+
+  const [rescueForm, setRescueForm] = useState({
+    boxId: '',
+    amount: '',
+    transferDate: new Date(),
+    description: '',
+  });
+
+  const [depositForm, setDepositForm] = useState({
+    boxId: '',
     amount: '',
     transferDate: new Date(),
     description: '',
@@ -228,7 +261,10 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
       const response = await fetch(`/api/financial-controls/${controlId}/bank-accounts`);
       if (response.ok) {
         const data = await response.json();
-        setBankAccounts(data);
+        // Remover duplicados e manter apenas ativos
+        const unique = Array.from(new Map((data as BankAccount[]).map(acc => [acc.id, acc])).values());
+        const activeOnly = unique.filter(acc => acc.isActive !== false);
+        setBankAccounts(activeOnly);
       }
     } catch (error) {
       console.error('Erro ao carregar contas:', error);
@@ -244,6 +280,18 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
       }
     } catch (error) {
       console.error('Erro ao carregar cartões:', error);
+    }
+  };
+
+  const loadBoxes = async () => {
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/boxes`);
+      if (response.ok) {
+        const data = await response.json();
+        setBoxes(data.filter((box: Box) => box.isActive));
+      }
+    } catch (error) {
+      console.error('Erro ao carregar caixinhas:', error);
     }
   };
 
@@ -275,8 +323,24 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     try {
       const response = await fetch(`/api/financial-controls/${controlId}/account-balances?month=${currentMonth}`);
       if (response.ok) {
-        const data = await response.json();
-        setAccountBalances(data);
+        const data: Array<{ accountId: string; finalBalance: number }> = await response.json();
+        // Enriquecer com nome, banco e saldo inicial
+        const enriched = data.map((b) => {
+          const acc = bankAccounts.find((a) => a.id === b.accountId);
+          return {
+            accountId: b.accountId,
+            finalBalance: b.finalBalance,
+            accountName: acc?.name,
+            bankName: acc?.bankName,
+            initialBalance: acc ? Number(acc.initialBalance || 0) : 0,
+            income: 0,
+            expenses: 0,
+            transfersIn: 0,
+            transfersOut: 0,
+            invoicePayments: 0,
+          } as AccountBalance;
+        });
+        setAccountBalances(enriched);
       }
     } catch (error) {
       console.error('Erro ao carregar saldos:', error);
@@ -292,6 +356,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         loadCardInvoices(),
         loadBankAccounts(),
         loadCards(),
+        loadBoxes(),
         loadAccountBalances(),
         loadAccounts(),
         loadClassifications(),
@@ -341,13 +406,52 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...transactionForm,
+          accountId: transactionForm.accountId,
+          name: transactionForm.name,
+          type: transactionForm.type,
+          expectedAmount: transactionForm.expectedAmount,
+          paymentMethod: transactionForm.paymentMethod,
+          bankAccountId: transactionForm.bankAccountId || null,
+          cardId: transactionForm.cardId || null,
+          boxId: transactionForm.boxId || null,
+          // campos de resgate removidos
           monthYear: currentMonth,
           actualAmount: transactionForm.paidDate ? transactionForm.expectedAmount : null,
+          paidDate: transactionForm.paidDate,
+          observation: '',
         }),
       });
 
       if (response.ok) {
+        // Opcional: criar transferência automática de resgate/aporte para caixinha
+        if (
+          transactionForm.paymentMethod === 'bank_account' &&
+          transactionForm.boxId &&
+          transactionForm.bankAccountId &&
+          transactionForm.autoBoxTransfer
+        ) {
+          const isExpense = transactionForm.type === 'expense';
+          const transferPayload = {
+            fromBankAccountId: transactionForm.bankAccountId,
+            toBankAccountId: transactionForm.bankAccountId,
+            fromBoxId: isExpense ? transactionForm.boxId : null,
+            toBoxId: isExpense ? null : transactionForm.boxId,
+            amount: transactionForm.expectedAmount,
+            monthYear: currentMonth,
+            transferDate: dayjs(transactionForm.paidDate || new Date()).format('YYYY-MM-DD'),
+            description: isExpense ? 'Resgate automático ao lançar despesa' : 'Aporte automático ao lançar receita',
+            force: true,
+          };
+          try {
+            await fetch(`/api/financial-controls/${controlId}/transfers`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(transferPayload),
+            });
+          } catch (e) {
+            // não bloquear fluxo por falha no aporte/resgate
+          }
+        }
         notifications.show({
           title: 'Sucesso',
           message: 'Transação criada',
@@ -362,7 +466,9 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           paymentMethod: 'bank_account',
           bankAccountId: '',
           cardId: '',
+          boxId: '',
           paidDate: null,
+          autoBoxTransfer: false,
         });
         loadAllData();
       } else {
@@ -454,6 +560,108 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         message: 'Não foi possível criar a transferência',
         color: 'red',
       });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRescueSubmit = async (force = false) => {
+    if (!rescueForm.boxId || !rescueForm.amount) {
+      notifications.show({ title: 'Erro', message: 'Selecione a caixinha e informe o valor', color: 'red' });
+      return;
+    }
+    const selectedBox = boxes.find(b => b.id === rescueForm.boxId);
+    if (!selectedBox) {
+      notifications.show({ title: 'Erro', message: 'Caixinha inválida', color: 'red' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/transfers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromBankAccountId: selectedBox.bankAccountId,
+          toBankAccountId: selectedBox.bankAccountId,
+          fromBoxId: rescueForm.boxId,
+          toBoxId: null,
+          amount: rescueForm.amount,
+          monthYear: currentMonth,
+          transferDate: dayjs(rescueForm.transferDate).format('YYYY-MM-DD'),
+          description: rescueForm.description || 'Resgate de caixinha',
+          force,
+        }),
+      });
+      if (response.ok) {
+        notifications.show({ title: 'Sucesso', message: 'Resgate realizado', color: 'green' });
+        setRescueModalOpened(false);
+        setRescueForm({ boxId: '', amount: '', transferDate: new Date(), description: '' });
+        loadAllData();
+      } else if (response.status === 409) {
+        const data = await response.json();
+        modals.openConfirmModal({
+          title: '⚠️ Transferência Duplicada',
+          children: (<Text size="sm">{data.error}<br /><br /><strong>Deseja criar mesmo assim?</strong></Text>),
+          labels: { confirm: 'Sim, criar mesmo assim', cancel: 'Cancelar' },
+          confirmProps: { color: 'orange' },
+          onConfirm: () => handleRescueSubmit(true),
+        });
+      } else {
+        throw new Error('Erro ao criar resgate');
+      }
+    } catch {
+      notifications.show({ title: 'Erro', message: 'Não foi possível criar o resgate', color: 'red' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDepositSubmit = async (force = false) => {
+    if (!depositForm.boxId || !depositForm.amount) {
+      notifications.show({ title: 'Erro', message: 'Selecione a caixinha e informe o valor', color: 'red' });
+      return;
+    }
+    const selectedBox = boxes.find(b => b.id === depositForm.boxId);
+    if (!selectedBox) {
+      notifications.show({ title: 'Erro', message: 'Caixinha inválida', color: 'red' });
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/financial-controls/${controlId}/transfers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromBankAccountId: selectedBox.bankAccountId,
+          toBankAccountId: selectedBox.bankAccountId,
+          fromBoxId: null,
+          toBoxId: depositForm.boxId,
+          amount: depositForm.amount,
+          monthYear: currentMonth,
+          transferDate: dayjs(depositForm.transferDate).format('YYYY-MM-DD'),
+          description: depositForm.description || 'Aporte em caixinha',
+          force,
+        }),
+      });
+      if (response.ok) {
+        notifications.show({ title: 'Sucesso', message: 'Aporte realizado', color: 'green' });
+        setDepositModalOpened(false);
+        setDepositForm({ boxId: '', amount: '', transferDate: new Date(), description: '' });
+        loadAllData();
+      } else if (response.status === 409) {
+        const data = await response.json();
+        modals.openConfirmModal({
+          title: '⚠️ Transferência Duplicada',
+          children: (<Text size="sm">{data.error}<br /><br /><strong>Deseja criar mesmo assim?</strong></Text>),
+          labels: { confirm: 'Sim, criar mesmo assim', cancel: 'Cancelar' },
+          confirmProps: { color: 'orange' },
+          onConfirm: () => handleDepositSubmit(true),
+        });
+      } else {
+        throw new Error('Erro ao criar aporte');
+      }
+    } catch {
+      notifications.show({ title: 'Erro', message: 'Não foi possível criar o aporte', color: 'red' });
     } finally {
       setLoading(false);
     }
@@ -676,6 +884,7 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
       paymentMethod: transaction.paymentMethod,
       bankAccountId: transaction.bankAccountId || '',
       cardId: transaction.cardId || '',
+      boxId: transaction.boxId || '',
     });
     setEditTransactionModalOpened(true);
   };
@@ -939,7 +1148,6 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           <Tabs.Tab value="invoices" leftSection={<IconCreditCard size={16} />}>
             Faturas de Cartão
           </Tabs.Tab>
-          <Tabs.Tab value="balances">Saldos das Contas</Tabs.Tab>
         </Tabs.List>
 
         {/* ABA: Transações */}
@@ -1087,14 +1295,32 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         <Tabs.Panel value="transfers">
           <Paper shadow="xs" p="md">
             <Group justify="space-between" mb="md">
-              <Text fw={500}>Transferências entre Contas</Text>
-              <Button
-                leftSection={<IconArrowsExchange size={16} />}
-                size="sm"
-                onClick={() => setTransferModalOpened(true)}
-              >
-                Nova Transferência
-              </Button>
+              <Text fw={500}>Transferências entre Contas / Resgates de Caixinha</Text>
+              <Group gap="xs">
+                <Button
+                  variant="light"
+                  color="teal"
+                  size="sm"
+                  onClick={() => setRescueModalOpened(true)}
+                >
+                  Resgatar da Caixinha
+                </Button>
+                <Button
+                  variant="light"
+                  color="indigo"
+                  size="sm"
+                  onClick={() => setDepositModalOpened(true)}
+                >
+                  Aportar na Caixinha
+                </Button>
+                <Button
+                  leftSection={<IconArrowsExchange size={16} />}
+                  size="sm"
+                  onClick={() => setTransferModalOpened(true)}
+                >
+                  Nova Transferência
+                </Button>
+              </Group>
             </Group>
 
             <Table striped highlightOnHover>
@@ -1278,101 +1504,6 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           </Paper>
         </Tabs.Panel>
 
-        {/* ABA: Saldos das Contas */}
-        <Tabs.Panel value="balances">
-          <Paper shadow="xs" p="md">
-            <Text fw={500} mb="md">Saldos das Contas Bancárias - {dayjs(currentMonth).format('MMMM/YYYY')}</Text>
-
-            {pageLoading ? (
-              <Stack gap="md">
-                {Array(2).fill(0).map((_, i) => (
-                  <Paper key={`skeleton-balance-${i}`} withBorder p="md">
-                    <Group justify="space-between" mb="md">
-                      <div>
-                        <Skeleton height={24} width={200} mb={8} />
-                        <Skeleton height={16} width={150} />
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <Skeleton height={14} width={80} mb={4} />
-                        <Skeleton height={28} width={120} />
-                      </div>
-                    </Group>
-                    <Stack gap="xs">
-                      <Skeleton height={20} width="100%" />
-                      <Skeleton height={20} width="100%" />
-                      <Skeleton height={20} width="100%" />
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            ) : accountBalances.length === 0 ? (
-              <Text c="dimmed" ta="center" py={32}>
-                Nenhuma conta com controle de saldo ativado. Ative o controle nas configurações das contas.
-              </Text>
-            ) : (
-              <Stack gap="md">
-                {accountBalances.map((balance) => (
-                  <Paper key={balance.accountId} withBorder p="md">
-                    <Group justify="space-between" mb="md">
-                      <div>
-                        <Text fw={600} size="lg">{balance.accountName}</Text>
-                        <Text size="sm" c="dimmed">{balance.bankName}</Text>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <Text size="xs" c="dimmed">Saldo Final</Text>
-                        <Text fw={700} size="xl" c={balance.finalBalance >= 0 ? 'green' : 'red'}>
-                          R$ {balance.finalBalance.toFixed(2)}
-                        </Text>
-                      </div>
-                    </Group>
-
-                    <Stack gap="xs">
-                      <Group justify="space-between">
-                        <Text size="sm" c="dimmed">Saldo Inicial:</Text>
-                        <Text size="sm" fw={500}>R$ {balance.initialBalance.toFixed(2)}</Text>
-                      </Group>
-
-                      {balance.income > 0 && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="green">+ Receitas:</Text>
-                          <Text size="sm" fw={500} c="green">R$ {balance.income.toFixed(2)}</Text>
-                        </Group>
-                      )}
-
-                      {balance.expenses > 0 && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="red">- Despesas:</Text>
-                          <Text size="sm" fw={500} c="red">R$ {balance.expenses.toFixed(2)}</Text>
-                        </Group>
-                      )}
-
-                      {balance.transfersIn > 0 && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="teal">+ Transferências Recebidas:</Text>
-                          <Text size="sm" fw={500} c="teal">R$ {balance.transfersIn.toFixed(2)}</Text>
-                        </Group>
-                      )}
-
-                      {balance.transfersOut > 0 && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="orange">- Transferências Enviadas:</Text>
-                          <Text size="sm" fw={500} c="orange">R$ {balance.transfersOut.toFixed(2)}</Text>
-                        </Group>
-                      )}
-
-                      {balance.invoicePayments > 0 && (
-                        <Group justify="space-between">
-                          <Text size="sm" c="red">- Pagamentos de Faturas:</Text>
-                          <Text size="sm" fw={500} c="red">R$ {balance.invoicePayments.toFixed(2)}</Text>
-                        </Group>
-                      )}
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            )}
-          </Paper>
-        </Tabs.Panel>
       </Tabs>
 
       {/* Modal: Nova Transação */}
@@ -1438,17 +1569,46 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           />
 
           {transactionForm.paymentMethod === 'bank_account' && (
-            <Select
-              label="Conta Bancária"
-              placeholder="Selecione uma conta"
-              value={transactionForm.bankAccountId}
-              onChange={(value) => setTransactionForm({ ...transactionForm, bankAccountId: value || '' })}
-              data={bankAccounts.map((acc) => ({
-                value: acc.id,
-                label: `${acc.name} - ${acc.bankName}`,
-              }))}
-              required
-            />
+            <>
+              <Select
+                label="Conta Bancária"
+                placeholder="Selecione uma conta"
+                value={transactionForm.bankAccountId}
+                onChange={(value) => setTransactionForm({ ...transactionForm, bankAccountId: value || '', boxId: '' })}
+                data={bankAccounts.map((acc) => ({
+                  value: acc.id,
+                  label: `${acc.name} - ${acc.bankName}`,
+                }))}
+                required
+              />
+              
+              {transactionForm.bankAccountId && (
+                <Select
+                  label="Caixinha (Opcional)"
+                  placeholder="Selecione uma caixinha"
+                  value={transactionForm.boxId}
+                  onChange={(value) => setTransactionForm({ ...transactionForm, boxId: value || '' })}
+                  data={boxes
+                    .filter((box) => box.bankAccountId === transactionForm.bankAccountId)
+                    .map((box) => ({
+                      value: box.id,
+                      label: box.name,
+                    }))}
+                  searchable
+                  clearable
+                />
+              )}
+
+              {transactionForm.bankAccountId && transactionForm.boxId && (
+                <Checkbox
+                  label={transactionForm.type === 'expense' ? 'Criar resgate automático da caixinha' : 'Criar aporte automático na caixinha'}
+                  checked={transactionForm.autoBoxTransfer}
+                  onChange={(e) => setTransactionForm({ ...transactionForm, autoBoxTransfer: e.currentTarget.checked })}
+                />
+              )}
+
+              {/* Controles de resgate removidos */}
+            </>
           )}
 
           {transactionForm.paymentMethod === 'credit_card' && (
@@ -1568,6 +1728,104 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
         </Stack>
       </Modal>
 
+      {/* Modal: Resgatar da Caixinha */}
+      <Modal
+        opened={rescueModalOpened}
+        onClose={() => setRescueModalOpened(false)}
+        title="Resgatar da Caixinha"
+        size="lg"
+      >
+        <Stack>
+          <Select
+            label="Caixinha"
+            placeholder="Selecione a caixinha"
+            value={rescueForm.boxId}
+            onChange={(value) => setRescueForm({ ...rescueForm, boxId: value || '' })}
+            data={boxes.filter(b => b.isActive).map(b => ({ value: b.id, label: b.name }))}
+            searchable
+            required
+          />
+          <NumberInput
+            label="Valor"
+            placeholder="0.00"
+            decimalScale={2}
+            fixedDecimalScale
+            thousandSeparator="."
+            decimalSeparator="," 
+            value={rescueForm.amount}
+            onChange={(value) => setRescueForm({ ...rescueForm, amount: String(value) })}
+            required
+          />
+          <DateInput
+            label="Data"
+            value={rescueForm.transferDate}
+            onChange={(value) => setRescueForm({ ...rescueForm, transferDate: value || new Date() })}
+            valueFormat="DD/MM/YYYY"
+            dateParser={parseBrazilianDate}
+            required
+          />
+          <TextInput
+            label="Descrição (opcional)"
+            placeholder="Ex: Resgate para pagamento"
+            value={rescueForm.description}
+            onChange={(e) => setRescueForm({ ...rescueForm, description: e.target.value })}
+          />
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setRescueModalOpened(false)}>Cancelar</Button>
+            <Button onClick={() => handleRescueSubmit()} loading={loading}>Salvar</Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Modal: Aportar na Caixinha */}
+      <Modal
+        opened={depositModalOpened}
+        onClose={() => setDepositModalOpened(false)}
+        title="Aportar na Caixinha"
+        size="lg"
+      >
+        <Stack>
+          <Select
+            label="Caixinha"
+            placeholder="Selecione a caixinha"
+            value={depositForm.boxId}
+            onChange={(value) => setDepositForm({ ...depositForm, boxId: value || '' })}
+            data={boxes.filter(b => b.isActive).map(b => ({ value: b.id, label: b.name }))}
+            searchable
+            required
+          />
+          <NumberInput
+            label="Valor"
+            placeholder="0.00"
+            decimalScale={2}
+            fixedDecimalScale
+            thousandSeparator="."
+            decimalSeparator="," 
+            value={depositForm.amount}
+            onChange={(value) => setDepositForm({ ...depositForm, amount: String(value) })}
+            required
+          />
+          <DateInput
+            label="Data"
+            value={depositForm.transferDate}
+            onChange={(value) => setDepositForm({ ...depositForm, transferDate: value || new Date() })}
+            valueFormat="DD/MM/YYYY"
+            dateParser={parseBrazilianDate}
+            required
+          />
+          <TextInput
+            label="Descrição (opcional)"
+            placeholder="Ex: Aporte para objetivo"
+            value={depositForm.description}
+            onChange={(e) => setDepositForm({ ...depositForm, description: e.target.value })}
+          />
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setDepositModalOpened(false)}>Cancelar</Button>
+            <Button onClick={() => handleDepositSubmit()} loading={loading}>Salvar</Button>
+          </Group>
+        </Stack>
+      </Modal>
+
       {/* Modal: Editar Transferência */}
       <Modal
         opened={editTransferModalOpened}
@@ -1679,18 +1937,38 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           />
 
           {editTransactionForm.paymentMethod === 'bank_account' && (
-            <Select
-              label="Conta Bancária"
-              placeholder="Selecione uma conta"
-              value={editTransactionForm.bankAccountId}
-              onChange={(value) => setEditTransactionForm({ ...editTransactionForm, bankAccountId: value || '' })}
-              data={bankAccounts.map((acc) => ({
-                value: acc.id,
-                label: `${acc.name} - ${acc.bankName}`,
-              }))}
-              searchable
-              required
-            />
+            <>
+              <Select
+                label="Conta Bancária"
+                placeholder="Selecione uma conta"
+                value={editTransactionForm.bankAccountId}
+                onChange={(value) => setEditTransactionForm({ ...editTransactionForm, bankAccountId: value || '', boxId: '' })}
+                data={bankAccounts.map((acc) => ({
+                  value: acc.id,
+                  label: `${acc.name} - ${acc.bankName}`,
+                }))}
+                searchable
+                required
+              />
+              
+              {editTransactionForm.bankAccountId && (
+                <Select
+                  label="Caixinha (Opcional)"
+                  placeholder="Selecione uma caixinha"
+                  value={editTransactionForm.boxId}
+                  onChange={(value) => setEditTransactionForm({ ...editTransactionForm, boxId: value || '' })}
+                  data={boxes
+                    .filter((box) => box.bankAccountId === editTransactionForm.bankAccountId)
+                    .map((box) => ({
+                      value: box.id,
+                      label: box.name,
+                    }))}
+                  clearable
+                />
+              )}
+
+              {/* Controles de resgate removidos */}
+            </>
           )}
 
           {editTransactionForm.paymentMethod === 'credit_card' && (

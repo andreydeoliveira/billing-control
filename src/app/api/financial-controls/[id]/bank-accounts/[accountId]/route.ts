@@ -4,6 +4,72 @@ import { db } from '@/db';
 import { bankAccounts, financialControlUsers } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string; accountId: string }> }
+) {
+  try {
+    const session = await auth();
+    
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+
+    const { id: controlId, accountId } = await params;
+    const body = await request.json();
+
+    // Verificar se o usuário tem acesso ao controle
+    const userAccess = await db
+      .select()
+      .from(financialControlUsers)
+      .where(
+        and(
+          eq(financialControlUsers.userId, session.user.id),
+          eq(financialControlUsers.financialControlId, controlId)
+        )
+      )
+      .limit(1);
+
+    if (userAccess.length === 0) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    // Verificar se a conta pertence ao controle
+    const account = await db
+      .select()
+      .from(bankAccounts)
+      .where(
+        and(
+          eq(bankAccounts.id, accountId),
+          eq(bankAccounts.financialControlId, controlId)
+        )
+      )
+      .limit(1);
+
+    if (account.length === 0) {
+      return NextResponse.json({ error: 'Conta não encontrada' }, { status: 404 });
+    }
+
+    // Atualizar isActive
+    const [updatedAccount] = await db
+      .update(bankAccounts)
+      .set({
+        isActive: body.isActive,
+        updatedAt: new Date(),
+      })
+      .where(eq(bankAccounts.id, accountId))
+      .returning();
+
+    return NextResponse.json(updatedAccount);
+  } catch (error) {
+    console.error('Erro ao atualizar conta:', error);
+    return NextResponse.json(
+      { error: 'Erro ao atualizar conta bancária' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; accountId: string }> }

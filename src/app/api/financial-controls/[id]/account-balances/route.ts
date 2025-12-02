@@ -9,7 +9,7 @@ import {
   cardInvoices,
   expenseIncomeAccounts
 } from '@/db/schema';
-import { eq, and, gte, lte, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 export async function GET(
   request: NextRequest,
@@ -46,141 +46,63 @@ export async function GET(
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
-    // Buscar contas com trackBalance = true
+    // Buscar contas do controle
     const accounts = await db
-      .select()
+      .select({
+        id: bankAccounts.id,
+        initialBalance: bankAccounts.initialBalance,
+      })
       .from(bankAccounts)
-      .where(
-        and(
-          eq(bankAccounts.financialControlId, controlId),
-          eq(bankAccounts.trackBalance, true)
-        )
-      );
+      .where(eq(bankAccounts.financialControlId, controlId));
 
-    if (accounts.length === 0) {
-      return NextResponse.json([]);
+    const results: Array<{ accountId: string; finalBalance: number }> = [];
+
+    for (const acc of accounts) {
+      const initial = parseFloat((acc.initialBalance as unknown as string) || '0');
+
+      // Transações pagas do mês na conta bancária
+      const txs = await db
+        .select({ amount: monthlyTransactions.actualAmount, type: expenseIncomeAccounts.type })
+        .from(monthlyTransactions)
+        .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
+        .where(
+          and(
+            eq(monthlyTransactions.financialControlId, controlId),
+            eq(monthlyTransactions.bankAccountId, acc.id),
+            eq(monthlyTransactions.monthYear, month),
+            sql`${monthlyTransactions.paidDate} IS NOT NULL`
+          )
+        );
+
+      const incomeSum = txs
+        .filter((t) => t.type === 'income')
+        .reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
+      const expenseSum = txs
+        .filter((t) => t.type === 'expense')
+        .reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
+
+      // Transferências do mês entre contas (ignorar movimentos internos de caixinha na mesma conta)
+      const transfersIn = await db
+        .select({ amount: transfers.amount, fromId: transfers.fromBankAccountId })
+        .from(transfers)
+        .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, month), eq(transfers.toBankAccountId, acc.id)));
+      const transfersOut = await db
+        .select({ amount: transfers.amount, toId: transfers.toBankAccountId })
+        .from(transfers)
+        .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, month), eq(transfers.fromBankAccountId, acc.id)));
+
+      const transferInSum = transfersIn
+        .filter((t) => t.fromId !== acc.id)
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      const transferOutSum = transfersOut
+        .filter((t) => t.toId !== acc.id)
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+      const finalBalance = initial + incomeSum - expenseSum + transferInSum - transferOutSum;
+      results.push({ accountId: acc.id as unknown as string, finalBalance });
     }
 
-    const startDate = new Date(`${month}-01`);
-    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
-
-    const balances = await Promise.all(
-      accounts.map(async (account) => {
-        const accountId = account.id;
-        
-        // 1. Transações pagas na conta (receitas e despesas)
-        const transactions = await db
-          .select({
-            type: expenseIncomeAccounts.type,
-            actualAmount: monthlyTransactions.actualAmount,
-          })
-          .from(monthlyTransactions)
-          .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
-          .where(
-            and(
-              eq(monthlyTransactions.bankAccountId, accountId),
-              eq(monthlyTransactions.monthYear, month),
-              sql`${monthlyTransactions.paidDate} IS NOT NULL`
-            )
-          );
-
-        // 2. Transferências de saída (débito)
-        const transfersOut = await db
-          .select({
-            amount: transfers.amount,
-          })
-          .from(transfers)
-          .where(
-            and(
-              eq(transfers.fromBankAccountId, accountId),
-              gte(transfers.transferDate, startDate.toISOString()),
-              lte(transfers.transferDate, endDate.toISOString())
-            )
-          );
-
-        // 3. Transferências de entrada (crédito)
-        const transfersIn = await db
-          .select({
-            amount: transfers.amount,
-          })
-          .from(transfers)
-          .where(
-            and(
-              eq(transfers.toBankAccountId, accountId),
-              gte(transfers.transferDate, startDate.toISOString()),
-              lte(transfers.transferDate, endDate.toISOString())
-            )
-          );
-
-        // 4. Pagamentos de faturas (débito)
-        const invoicePayments = await db
-          .select({
-            totalAmount: cardInvoices.totalAmount,
-          })
-          .from(cardInvoices)
-          .where(
-            and(
-              eq(cardInvoices.bankAccountId, accountId),
-              eq(cardInvoices.isPaid, true),
-              sql`${cardInvoices.paidDate} >= ${startDate.toISOString()}`,
-              sql`${cardInvoices.paidDate} <= ${endDate.toISOString()}`
-            )
-          );
-
-        // Calcular saldo inicial
-        const initialBalance = parseFloat(account.initialBalance || '0');
-
-        // Calcular receitas e despesas
-        const income = transactions
-          .filter((t) => t.type === 'income')
-          .reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
-
-        const expenses = transactions
-          .filter((t) => t.type === 'expense')
-          .reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
-
-        // Calcular transferências
-        const transfersInTotal = transfersIn.reduce(
-          (sum, t) => sum + parseFloat(t.amount), 
-          0
-        );
-
-        const transfersOutTotal = transfersOut.reduce(
-          (sum, t) => sum + parseFloat(t.amount), 
-          0
-        );
-
-        // Calcular pagamentos de faturas
-        const invoicePaymentsTotal = invoicePayments.reduce(
-          (sum, i) => sum + parseFloat(i.totalAmount), 
-          0
-        );
-
-        // Saldo final = saldo inicial + receitas - despesas + transferências entrada - transferências saída - faturas pagas
-        const finalBalance = 
-          initialBalance + 
-          income - 
-          expenses + 
-          transfersInTotal - 
-          transfersOutTotal - 
-          invoicePaymentsTotal;
-
-        return {
-          accountId: account.id,
-          accountName: account.name,
-          bankName: account.bankName,
-          initialBalance,
-          income,
-          expenses,
-          transfersIn: transfersInTotal,
-          transfersOut: transfersOutTotal,
-          invoicePayments: invoicePaymentsTotal,
-          finalBalance,
-        };
-      })
-    );
-
-    return NextResponse.json(balances);
+    return NextResponse.json(results);
   } catch (error) {
     console.error('Erro ao buscar saldos:', error);
     return NextResponse.json(

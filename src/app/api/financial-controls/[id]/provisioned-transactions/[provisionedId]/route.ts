@@ -87,6 +87,10 @@ export async function PATCH(
   }
 
   const { id: controlId, provisionedId } = await context.params;
+  const { searchParams } = new URL(request.url);
+  const strategy = searchParams.get('strategy'); // 'all' | 'future' | 'period'
+  const startMonth = searchParams.get('startMonth'); // formato: YYYY-MM
+  const endMonth = searchParams.get('endMonth'); // formato: YYYY-MM
 
   try {
     // Verificar acesso
@@ -144,6 +148,55 @@ export async function PATCH(
           eq(provisionedTransactions.financialControlId, controlId)
         )
       );
+
+    // Se há estratégia definida, atualizar transações mensais vinculadas
+    if (strategy) {
+      const today = new Date().toISOString().split('T')[0];
+      const currentMonth = today.substring(0, 7); // YYYY-MM
+      
+      // Construir condições baseadas na estratégia
+      let updateConditions = [
+        eq(monthlyTransactions.provisionedTransactionId, provisionedId),
+        eq(monthlyTransactions.financialControlId, controlId),
+      ];
+
+      if (strategy === 'future') {
+        // Apenas transações futuras (não pagas)
+        updateConditions.push(isNull(monthlyTransactions.paidDate));
+      } else if (strategy === 'period' && startMonth && endMonth) {
+        // Período específico
+        updateConditions.push(
+          and(
+            gte(monthlyTransactions.monthYear, startMonth),
+            lte(monthlyTransactions.monthYear, endMonth)
+          )!
+        );
+      }
+      // strategy === 'all' não adiciona filtros extras
+
+      // Atualizar transações mensais
+      const updateData: any = {
+        accountId: body.accountId,
+        observation: body.observation || null,
+        expectedAmount: validatedAmount,
+        actualAmount: validatedAmount,
+        bankAccountId,
+        cardId,
+        updatedAt: new Date(),
+      };
+
+      // Adicionar paymentMethod apenas se houver banco ou cartão
+      if (bankAccountId) {
+        updateData.paymentMethod = 'debit';
+      } else if (cardId) {
+        updateData.paymentMethod = 'credit_card';
+      }
+
+      await db
+        .update(monthlyTransactions)
+        .set(updateData)
+        .where(and(...updateConditions));
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -32,6 +32,7 @@ import {
   IconFileInvoice,
   IconReportAnalytics,
   IconUserCog,
+  IconBox,
 } from '@tabler/icons-react';
 import { MonthlyView } from '@/components/control/MonthlyView';
 import { BankAccounts } from '@/components/control/BankAccounts';
@@ -41,6 +42,7 @@ import { Overview } from '@/components/control/Overview';
 import { Projection } from '@/components/control/Projection';
 import { Accounts } from '@/components/control/Accounts';
 import { MonthlySummaryView } from '@/components/control/MonthlySummaryView';
+import { Boxes } from '@/components/control/Boxes';
 
 interface FinancialControl {
   id: string;
@@ -58,6 +60,7 @@ export default function ControlPage() {
   const [control, setControl] = useState<FinancialControl | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState('monthly');
+  const [selectedBankAccountForBoxes, setSelectedBankAccountForBoxes] = useState<string | null>(null);
 
   useEffect(() => {
     const loadControl = async () => {
@@ -146,7 +149,7 @@ export default function ControlPage() {
               >
                 Membros do Controle
               </Menu.Item>
-              {session?.user?.email === 'andrey.oliveirasg@gmail.com' && (
+              {session?.user?.role === 'admin' && (
                 <Menu.Item
                   leftSection={<IconUsers style={{ width: rem(16), height: rem(16) }} />}
                   onClick={() => router.push('/admin/users')}
@@ -221,6 +224,8 @@ export default function ControlPage() {
             description="Gerencie suas contas"
           />
 
+          {/* Removed direct navigation to Caixinhas; access via bank account */}
+
           <NavLink
             label="Cartões"
             leftSection={<IconCreditCard size="1.2rem" />}
@@ -256,7 +261,25 @@ export default function ControlPage() {
       <AppShell.Main>
         {activeView === 'monthly' && <MonthlyView controlId={control.id} />}
         {activeView === 'accountsList' && <Accounts controlId={control.id} />}
-        {activeView === 'accounts' && <BankAccounts controlId={control.id} />}
+        {activeView === 'accounts' && (
+          <BankAccounts
+            controlId={control.id}
+            onOpenBoxes={(bankAccountId: string) => {
+              setSelectedBankAccountForBoxes(bankAccountId);
+              setActiveView('boxes');
+            }}
+          />
+        )}
+        {activeView === 'boxes' && (
+          <Boxes 
+            controlId={control.id} 
+            filterBankAccountId={selectedBankAccountForBoxes ?? undefined}
+            onBack={() => {
+              setActiveView('accounts');
+              setSelectedBankAccountForBoxes(null);
+            }}
+          />
+        )}
         {activeView === 'cards' && <Cards controlId={control.id} />}
         {activeView === 'provisioned' && <ProvisionedTransactions controlId={control.id} />}
         {activeView === 'overview' && <Overview controlId={control.id} />}

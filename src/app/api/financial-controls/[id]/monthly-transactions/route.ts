@@ -106,7 +106,13 @@ export async function POST(
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
-    const body = await request.json();
+    // Garantir que sempre tratamos JSON e não quebramos em erro
+    let body: any;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return NextResponse.json({ error: 'Payload inválido. Envie JSON.' }, { status: 400 });
+    }
 
     // Validações
     if (!body.accountId) {
@@ -125,12 +131,13 @@ export async function POST(
       return NextResponse.json({ error: 'Selecione um cartão' }, { status: 400 });
     }
 
-    // Criar transação
+    // Criar transação (sem geração automática de transferência de caixinha)
+
     const [newTransaction] = await db
       .insert(monthlyTransactions)
       .values({
         financialControlId: controlId,
-        accountId: body.accountId, // Vincular à conta (Luz, Água, Uber, etc) - nome e tipo virão da conta
+        accountId: body.accountId, // Vincular à conta (Luz, Água, Uber, etc)
         observation: body.observation || null,
         expectedAmount: body.expectedAmount,
         actualAmount: body.actualAmount || null,
@@ -139,6 +146,7 @@ export async function POST(
         paymentMethod: body.paymentMethod,
         bankAccountId: body.bankAccountId || null,
         cardId: body.cardId || null,
+        boxId: body.boxId || null,
       })
       .returning();
 
@@ -198,5 +206,76 @@ export async function POST(
     return NextResponse.json(newTransaction, { status: 201 });
   } catch {
     return NextResponse.json({ error: 'Erro ao criar transação' }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+  }
+
+  const { id: controlId } = await context.params;
+
+  try {
+    const userAccess = await db
+      .select()
+      .from(financialControlUsers)
+      .where(
+        and(
+          eq(financialControlUsers.financialControlId, controlId),
+          eq(financialControlUsers.userId, session.user.id)
+        )
+      )
+      .limit(1);
+
+    if (userAccess.length === 0) {
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Payload inválido. Envie JSON.' }, { status: 400 });
+    }
+
+    if (!body.id) {
+      return NextResponse.json({ error: 'ID da transação é obrigatório' }, { status: 400 });
+    }
+
+    // Garantir que a transação pertence ao controle
+    const existing = await db
+      .select()
+      .from(monthlyTransactions)
+      .where(and(eq(monthlyTransactions.id, body.id), eq(monthlyTransactions.financialControlId, controlId)))
+      .limit(1);
+
+    if (existing.length === 0) {
+      return NextResponse.json({ error: 'Transação não encontrada' }, { status: 404 });
+    }
+
+    const update: any = {};
+    if (body.paidDate !== undefined) update.paidDate = body.paidDate; // string yyyy-mm-dd
+    if (body.actualAmount !== undefined) update.actualAmount = body.actualAmount;
+    if (body.bankAccountId !== undefined) update.bankAccountId = body.bankAccountId || null;
+    if (body.cardId !== undefined) update.cardId = body.cardId || null;
+    if (body.boxId !== undefined) update.boxId = body.boxId || null;
+    if (body.monthYear !== undefined) update.monthYear = body.monthYear;
+    if (body.observation !== undefined) update.observation = body.observation || null;
+
+    const [updated] = await db
+      .update(monthlyTransactions)
+      .set(update)
+      .where(eq(monthlyTransactions.id, body.id))
+      .returning();
+
+    return NextResponse.json({ message: 'Transação atualizada', transaction: updated });
+  } catch (error) {
+    console.error('Erro ao atualizar transação mensal:', error);
+    return NextResponse.json({ error: 'Erro ao atualizar transação' }, { status: 500 });
   }
 }

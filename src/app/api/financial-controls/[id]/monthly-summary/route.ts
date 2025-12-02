@@ -57,6 +57,7 @@ export async function GET(
           classificationName: accountClassifications.name,
           monthYear: monthlyTransactions.monthYear,
           total: sql<number>`COALESCE(SUM(CAST(${monthlyTransactions.actualAmount} AS DECIMAL)), 0)`,
+          expectedTotal: sql<number>`COALESCE(SUM(CAST(${monthlyTransactions.expectedAmount} AS DECIMAL)), 0)`,
         })
         .from(monthlyTransactions)
         .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
@@ -66,7 +67,7 @@ export async function GET(
             eq(monthlyTransactions.financialControlId, controlId),
             gte(monthlyTransactions.monthYear, startMonth),
             lte(monthlyTransactions.monthYear, endMonth),
-            sql`${monthlyTransactions.actualAmount} IS NOT NULL`
+            sql`TRUE`
           )
         )
         .groupBy(
@@ -89,6 +90,7 @@ export async function GET(
           accountType: expenseIncomeAccounts.type,
           monthYear: monthlyTransactions.monthYear,
           total: sql<number>`COALESCE(SUM(CAST(${monthlyTransactions.actualAmount} AS DECIMAL)), 0)`,
+          expectedTotal: sql<number>`COALESCE(SUM(CAST(${monthlyTransactions.expectedAmount} AS DECIMAL)), 0)`,
         })
         .from(monthlyTransactions)
         .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
@@ -98,7 +100,7 @@ export async function GET(
             eq(monthlyTransactions.financialControlId, controlId),
             gte(monthlyTransactions.monthYear, startMonth),
             lte(monthlyTransactions.monthYear, endMonth),
-            sql`${monthlyTransactions.actualAmount} IS NOT NULL`
+            sql`TRUE`
           )
         )
         .groupBy(
