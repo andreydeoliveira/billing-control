@@ -3,6 +3,7 @@ import { auth } from '@/auth';
 import { db } from '@/db';
 import { provisionedTransactions, financialControlUsers, monthlyTransactions } from '@/db/schema';
 import { eq, and, isNull, gte, lte, sql } from 'drizzle-orm';
+import dayjs from 'dayjs';
 import {
   parseAmount,
   validateInstallments,
@@ -127,8 +128,20 @@ export async function PATCH(
     const bankAccountId = body.bankAccountId && body.bankAccountId !== '' ? body.bankAccountId : null;
     const cardId = body.cardId && body.cardId !== '' ? body.cardId : null;
 
+    // Verificar se o registro existe
+    const existingRecord = await db
+      .select()
+      .from(provisionedTransactions)
+      .where(
+        and(
+          eq(provisionedTransactions.id, provisionedId),
+          eq(provisionedTransactions.financialControlId, controlId)
+        )
+      )
+      .limit(1);
+
     // Atualizar provisionado
-    await db
+    const updateResult = await db
       .update(provisionedTransactions)
       .set({
         accountId: body.accountId,
@@ -137,6 +150,7 @@ export async function PATCH(
         bankAccountId,
         cardId,
         isRecurring: body.isRecurring,
+        recurrenceType: body.isRecurring ? body.recurrenceType : null,
         installments: validatedInstallments,
         startDate: body.startDate || null,
         endDate: body.endDate || null,
@@ -147,7 +161,8 @@ export async function PATCH(
           eq(provisionedTransactions.id, provisionedId),
           eq(provisionedTransactions.financialControlId, controlId)
         )
-      );
+      )
+      .returning();
 
     // Se há estratégia definida, atualizar transações mensais vinculadas
     if (strategy) {
@@ -174,28 +189,102 @@ export async function PATCH(
       }
       // strategy === 'all' não adiciona filtros extras
 
-      // Atualizar transações mensais
-      const updateData: any = {
-        accountId: body.accountId,
-        observation: body.observation || null,
-        expectedAmount: validatedAmount,
-        actualAmount: validatedAmount,
-        bankAccountId,
-        cardId,
-        updatedAt: new Date(),
-      };
+      // Se strategy === 'all' e recurrenceType mudou, deletar e regenerar
+      if (strategy === 'all' && existingRecord[0] && existingRecord[0].recurrenceType !== (body.isRecurring ? body.recurrenceType : null)) {
+        console.log('[PATCH] RecurrenceType mudou, regenerando transações mensais');
+        
+        // Deletar TODAS as transações mensais vinculadas
+        await db
+          .delete(monthlyTransactions)
+          .where(
+            and(
+              eq(monthlyTransactions.provisionedTransactionId, provisionedId),
+              eq(monthlyTransactions.financialControlId, controlId)
+            )
+          );
 
-      // Adicionar paymentMethod apenas se houver banco ou cartão
-      if (bankAccountId) {
-        updateData.paymentMethod = 'debit';
-      } else if (cardId) {
-        updateData.paymentMethod = 'credit_card';
+        // Regenerar baseado no novo recurrenceType
+        if (body.isRecurring && body.startDate) {
+          const monthlyTransactionsToInsert: any[] = [];
+          const startDate = dayjs(body.startDate);
+          const recurrenceType = body.recurrenceType || 'monthly';
+          
+          if (recurrenceType === 'monthly') {
+            // Mensal: gerar 12 meses
+            for (let i = 0; i < 12; i++) {
+              const monthDate = startDate.add(i, 'month');
+              const monthYear = monthDate.format('YYYY-MM');
+              
+              monthlyTransactionsToInsert.push({
+                financialControlId: controlId,
+                provisionedTransactionId: provisionedId,
+                accountId: body.accountId,
+                observation: body.observation || null,
+                expectedAmount: validatedAmount,
+                actualAmount: null,
+                monthYear: monthYear,
+                paidDate: null,
+                paymentMethod: cardId ? 'credit_card' : (bankAccountId ? 'debit' : 'bank_account'),
+                bankAccountId: bankAccountId || null,
+                cardId: cardId || null,
+                installmentNumber: null,
+                totalInstallments: null,
+              });
+            }
+          } else if (recurrenceType === 'yearly') {
+            // Anual: gerar para os próximos 3 anos (mesmo mês de cada ano)
+            for (let i = 0; i < 3; i++) {
+              const yearDate = startDate.add(i, 'year');
+              const monthYear = yearDate.format('YYYY-MM');
+              
+              monthlyTransactionsToInsert.push({
+                financialControlId: controlId,
+                provisionedTransactionId: provisionedId,
+                accountId: body.accountId,
+                observation: body.observation || null,
+                expectedAmount: validatedAmount,
+                actualAmount: null,
+                monthYear: monthYear,
+                paidDate: null,
+                paymentMethod: cardId ? 'credit_card' : (bankAccountId ? 'debit' : 'bank_account'),
+                bankAccountId: bankAccountId || null,
+                cardId: cardId || null,
+                installmentNumber: null,
+                totalInstallments: null,
+              });
+            }
+          }
+          
+          if (monthlyTransactionsToInsert.length > 0) {
+            await db.insert(monthlyTransactions).values(monthlyTransactionsToInsert);
+            console.log('[PATCH] Regenerated', monthlyTransactionsToInsert.length, 'monthly transactions');
+          }
+        }
+      } else {
+        // Se não mudou recurrenceType, apenas atualizar campos existentes
+        // Atualizar transações mensais
+        const updateData: any = {
+          accountId: body.accountId,
+          observation: body.observation || null,
+          expectedAmount: validatedAmount,
+          actualAmount: validatedAmount,
+          bankAccountId,
+          cardId,
+          updatedAt: new Date(),
+        };
+
+        // Adicionar paymentMethod apenas se houver banco ou cartão
+        if (bankAccountId) {
+          updateData.paymentMethod = 'debit';
+        } else if (cardId) {
+          updateData.paymentMethod = 'credit_card';
+        }
+
+        await db
+          .update(monthlyTransactions)
+          .set(updateData)
+          .where(and(...updateConditions));
       }
-
-      await db
-        .update(monthlyTransactions)
-        .set(updateData)
-        .where(and(...updateConditions));
     }
 
     return NextResponse.json({ success: true });

@@ -5,9 +5,6 @@ import { defineConfig } from 'drizzle-kit';
 config({ path: '.env.local' });
 config({ path: '.env' });
 
-// Desabilita verificação de certificado autoassinado para Supabase
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 // Prioriza POSTGRES_URL_NON_POOLING (Vercel) → POSTGRES_URL
 const dbUrl =
   process.env.POSTGRES_URL_NON_POOLING ||

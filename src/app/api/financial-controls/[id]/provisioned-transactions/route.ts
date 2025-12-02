@@ -45,6 +45,7 @@ export async function GET(
         bankAccountId: provisionedTransactions.bankAccountId,
         cardId: provisionedTransactions.cardId,
         isRecurring: provisionedTransactions.isRecurring,
+        recurrenceType: provisionedTransactions.recurrenceType,
         installments: provisionedTransactions.installments,
         currentInstallment: provisionedTransactions.currentInstallment,
         startDate: provisionedTransactions.startDate,

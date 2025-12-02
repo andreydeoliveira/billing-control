@@ -518,6 +518,9 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
   };
 
   const openEditModal = async (transaction: ProvisionedTransaction) => {
+    console.log('[EDIT MODAL] Opening with transaction:', transaction);
+    console.log('[EDIT MODAL] transaction.recurrenceType:', transaction.recurrenceType);
+    console.log('[EDIT MODAL] transaction.isRecurring:', transaction.isRecurring);
     setSelectedTransaction(transaction);
     
     // Determinar paymentSource: none se não tem nem banco nem cartão, bank_account se tem banco, card se tem cartão
@@ -528,6 +531,9 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       paymentSource = 'card';
     }
     
+    const recurrenceValue = transaction.recurrenceType || 'monthly';
+    console.log('[EDIT MODAL] Setting recurrenceType to:', recurrenceValue);
+    
     setEditFormData({
       accountId: transaction.accountId,
       observation: transaction.observation || '',
@@ -536,14 +542,16 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       bankAccountId: transaction.bankAccountId || '',
       cardId: transaction.cardId || '',
       isRecurring: transaction.isRecurring,
-      recurrenceType: transaction.recurrenceType || 'monthly',
+      recurrenceType: recurrenceValue,
       installments: transaction.installments ? String(transaction.installments) : '',
       startDate: transaction.startDate ? new Date(transaction.startDate) : null,
       endDate: transaction.endDate ? new Date(transaction.endDate) : null,
     });
 
-    // Verificar se tem transações vinculadas
-    setPageLoading(true);
+    // Abrir modal IMEDIATAMENTE sem bloquear
+    setEditModalOpened(true);
+
+    // Verificar se tem transações vinculadas em background (sem bloquear a grid)
     try {
       const response = await fetch(
         `/api/financial-controls/${controlId}/provisioned-transactions/${transaction.id}?strategy=check`
@@ -561,11 +569,7 @@ export function ProvisionedTransactions({ controlId }: ProvisionedTransactionsPr
       }
     } catch (error) {
       console.error('Erro ao verificar transações:', error);
-    } finally {
-      setPageLoading(false);
     }
-
-    setEditModalOpened(true);
   };
 
   const handleEdit = async () => {

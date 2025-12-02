@@ -211,9 +211,10 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
     description: '',
   });
 
-  // Gerar lista de meses (12 anteriores + atual + 6 futuros = 19 meses)
-  const months = Array.from({ length: 19 }, (_, i) => {
-    const month = dayjs().subtract(12 - i, 'month');
+  // Gerar lista de meses do ano atual até o próximo (12 meses a partir de agora)
+  const now = dayjs();
+  const months = Array.from({ length: 12 }, (_, i) => {
+    const month = now.add(i, 'month');
     return {
       value: month.format('YYYY-MM'),
       label: month.format('MMMM [de] YYYY'),
