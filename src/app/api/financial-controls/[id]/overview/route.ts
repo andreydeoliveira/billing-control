@@ -8,7 +8,8 @@ import {
   cardInvoices,
   transfers,
   cards,
-  expenseIncomeAccounts
+  expenseIncomeAccounts,
+  bankAccountBoxes
 } from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import dayjs from 'dayjs';
@@ -45,6 +46,44 @@ export async function GET(
 
     // Funcionalidade de saldo removida temporariamente
     const totalBalance = 0;
+
+    // 1.1 Saldo das caixinhas (baseado em transferências de/para caixinhas)
+    // Buscar todas as caixinhas ativas
+    const boxes = await db
+      .select()
+      .from(bankAccountBoxes)
+      .where(
+        and(
+          eq(bankAccountBoxes.financialControlId, controlId),
+          eq(bankAccountBoxes.isActive, true)
+        )
+      );
+
+    // Calcular saldo de cada caixinha
+    const boxesBalance: Record<string, { name: string; balance: number }> = {};
+
+    for (const box of boxes) {
+      // Somar transferências para esta caixinha (entrada)
+      const incomingTransfers = await db
+        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
+        .from(transfers)
+        .where(eq(transfers.toBoxId, box.id));
+
+      const incomingAmount = parseFloat(incomingTransfers[0]?.total || '0');
+
+      // Somar transferências saindo desta caixinha (saída/resgate)
+      const outgoingTransfers = await db
+        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
+        .from(transfers)
+        .where(eq(transfers.fromBoxId, box.id));
+
+      const outgoingAmount = parseFloat(outgoingTransfers[0]?.total || '0');
+
+      boxesBalance[box.id] = {
+        name: box.name,
+        balance: incomingAmount - outgoingAmount,
+      };
+    }
 
     // 2. Receitas do mês atual (todas as contas)
     const monthlyIncomeTransactions = await db
@@ -135,6 +174,7 @@ export async function GET(
       monthlyIncome,
       monthlyExpenses,
       creditCardDebt,
+      boxesBalance, // Saldo das caixinhas
       alerts: {
         upcomingInvoices: upcomingInvoices.length,
         unpaidTransactions: unpaidTransactions.length,

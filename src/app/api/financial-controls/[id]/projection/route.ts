@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { db } from '@/db';
-import { provisionedTransactions, financialControlUsers, expenseIncomeAccounts } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { provisionedTransactions, financialControlUsers, expenseIncomeAccounts, bankAccountBoxes, transfers } from '@/db/schema';
+import { eq, and, sql } from 'drizzle-orm';
 
 export async function GET(
   request: NextRequest,
@@ -28,6 +28,33 @@ export async function GET(
 
     if (!access) {
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
+    }
+
+    // Calcular balance das caixinhas
+    const boxes = await db
+      .select()
+      .from(bankAccountBoxes)
+      .where(and(
+        eq(bankAccountBoxes.financialControlId, controlId),
+        eq(bankAccountBoxes.isActive, true)
+      ));
+
+    const boxesBalance: Record<string, { name: string; balance: number }> = {};
+    for (const box of boxes) {
+      const incomingTransfers = await db
+        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
+        .from(transfers)
+        .where(eq(transfers.toBoxId, box.id));
+      
+      const outgoingTransfers = await db
+        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
+        .from(transfers)
+        .where(eq(transfers.fromBoxId, box.id));
+      
+      boxesBalance[box.id] = {
+        name: box.name,
+        balance: parseFloat(incomingTransfers[0]?.total || '0') - parseFloat(outgoingTransfers[0]?.total || '0'),
+      };
     }
 
     // Buscar todos os gastos provisionados com informações da conta
@@ -84,10 +111,11 @@ export async function GET(
         expectedIncome,
         expectedExpenses,
         balance: expectedIncome - expectedExpenses,
+        boxesBalance,
       });
     }
 
-    return NextResponse.json(projections);
+    return NextResponse.json({ projections, boxesBalance });
   } catch (error) {
     console.error('Erro ao calcular projeção:', error);
     return NextResponse.json(

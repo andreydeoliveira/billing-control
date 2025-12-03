@@ -168,37 +168,6 @@ export function Boxes({ controlId, filterBankAccountId, onBack }: BoxesProps) {
           message: editingBox ? 'Caixinha atualizada!' : 'Caixinha criada!',
           color: 'green',
         });
-        // Se houver valor inicial, criar transferência de aporte para a caixinha
-        if (!editingBox) {
-          const createdBox = await response.json();
-          const initial = parseFloat(formData.initialAmount || '0');
-          if (isFinite(initial) && initial > 0) {
-            const now = new Date();
-            const monthYear = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-            try {
-              const transferRes = await fetch(`/api/financial-controls/${controlId}/transfers`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  fromBankAccountId: createdBox.bankAccountId,
-                  toBankAccountId: createdBox.bankAccountId,
-                  toBoxId: createdBox.id,
-                  amount: String(initial),
-                  monthYear,
-                  transferDate: now,
-                  description: 'Aporte inicial da caixinha',
-                  force: true,
-                }),
-              });
-              if (!transferRes.ok) {
-                const errText = await transferRes.text();
-                notifications.show({ title: 'Aviso', message: errText || 'Falha ao lançar aporte inicial', color: 'yellow' });
-              }
-            } catch (e) {
-              notifications.show({ title: 'Aviso', message: 'Falha de conexão ao lançar aporte inicial', color: 'yellow' });
-            }
-          }
-        }
         setModalOpened(false);
         setEditingBox(null);
         setFormData({ name: '', bankAccountId: filterBankAccountId || '', initialAmount: '' });
