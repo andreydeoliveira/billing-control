@@ -1014,11 +1014,17 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
   const handleGenerateMonthly = async () => {
     setLoading(true);
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 segundos de timeout
+
       const response = await fetch(`/api/financial-controls/${controlId}/generate-monthly`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ monthYear: currentMonth }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (response.ok) {
         const data = await response.json();
@@ -1028,15 +1034,40 @@ export function MonthlyView({ controlId }: MonthlyViewProps) {
           color: 'green',
         });
         loadAllData();
+      } else if (response.status === 504) {
+        notifications.show({
+          title: 'Timeout',
+          message: 'A requisição demorou muito tempo. O banco de dados pode estar lento. Tente novamente em alguns instantes.',
+          color: 'yellow',
+          autoClose: false,
+        });
       } else {
-        throw new Error('Erro ao gerar transações');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Erro ao gerar transações');
       }
-    } catch {
-      notifications.show({
-        title: 'Erro',
-        message: 'Não foi possível gerar as transações mensais',
-        color: 'red',
-      });
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          notifications.show({
+            title: 'Timeout',
+            message: 'A requisição excedeu o tempo limite. Por favor tente novamente.',
+            color: 'yellow',
+            autoClose: false,
+          });
+        } else {
+          notifications.show({
+            title: 'Erro',
+            message: error.message || 'Não foi possível gerar as transações mensais',
+            color: 'red',
+          });
+        }
+      } else {
+        notifications.show({
+          title: 'Erro',
+          message: 'Não foi possível gerar as transações mensais',
+          color: 'red',
+        });
+      }
     } finally {
       setLoading(false);
     }

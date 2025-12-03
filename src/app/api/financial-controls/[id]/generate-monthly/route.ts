@@ -76,8 +76,19 @@ export async function POST(
 
       // Verificar se deve criar transação
       if (prov.isRecurring) {
-        // Recorrente: sempre cria
+        // Recorrente: verificar startDate se existir
         shouldCreateTransaction = true;
+        
+        if (prov.startDate) {
+          const startDate = new Date(prov.startDate);
+          const startYear = startDate.getFullYear();
+          const startMonth = startDate.getMonth() + 1; // getMonth() retorna 0-11
+          
+          // Só cria se o mês alvo for >= mês de início
+          if (targetYear < startYear || (targetYear === startYear && targetMonth < startMonth)) {
+            shouldCreateTransaction = false;
+          }
+        }
       } else if (prov.installments && prov.currentInstallment && prov.currentInstallment <= prov.installments) {
         // Parcelado: verificar se deve criar baseado no startDate
         shouldCreateTransaction = true;
