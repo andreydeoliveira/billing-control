@@ -20,13 +20,11 @@ if (!dbUrl) {
 
 // Configurar timeout para evitar travamentos indefinidos
 const client = postgres(dbUrl, {
-  socket: {
-    // Timeout de 10 segundos para conexão
-    timeout: 10000,
-  },
-  // Timeout de 30 segundos por query
+  // Timeout de 10 segundos para conexão
+  connect_timeout: 10,
+  // Timeout de 30 segundos por query (idle_timeout)
   idle_timeout: 30,
-  max_lifetime: 30 * 60, // 30 minutos máximo de uso
-  command_timeout: 30, // 30 segundos por comando
+  // Máximo de 30 minutos por conexão
+  max_lifetime: 30 * 60,
 });
 export const db = drizzle({ client, schema });

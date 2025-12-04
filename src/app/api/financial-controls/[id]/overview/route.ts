@@ -47,8 +47,7 @@ export async function GET(
     // Funcionalidade de saldo removida temporariamente
     const totalBalance = 0;
 
-    // 1.1 Saldo das caixinhas (baseado em transferências de/para caixinhas)
-    // Buscar todas as caixinhas ativas
+    // 1.1 Saldo das caixinhas (com uma única query)
     const boxes = await db
       .select()
       .from(bankAccountBoxes)
@@ -59,29 +58,37 @@ export async function GET(
         )
       );
 
-    // Calcular saldo de cada caixinha
+    // Fetch all transfers at once
+    const incomingTransfersData = await db
+      .select({
+        boxId: transfers.toBoxId,
+        total: sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`,
+      })
+      .from(transfers)
+      .where(
+        sql`${transfers.toBoxId} IN (${sql.raw(boxes.map(b => `'${b.id}'`).join(',') || "'null'")})`
+      )
+      .groupBy(transfers.toBoxId);
+
+    const outgoingTransfersData = await db
+      .select({
+        boxId: transfers.fromBoxId,
+        total: sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`,
+      })
+      .from(transfers)
+      .where(
+        sql`${transfers.fromBoxId} IN (${sql.raw(boxes.map(b => `'${b.id}'`).join(',') || "'null'")})`
+      )
+      .groupBy(transfers.fromBoxId);
+
+    const incomingMap = new Map(incomingTransfersData.map(t => [t.boxId, t.total || 0]));
+    const outgoingMap = new Map(outgoingTransfersData.map(t => [t.boxId, t.total || 0]));
+
     const boxesBalance: Record<string, { name: string; balance: number }> = {};
-
     for (const box of boxes) {
-      // Somar transferências para esta caixinha (entrada)
-      const incomingTransfers = await db
-        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
-        .from(transfers)
-        .where(eq(transfers.toBoxId, box.id));
-
-      const incomingAmount = parseFloat(incomingTransfers[0]?.total || '0');
-
-      // Somar transferências saindo desta caixinha (saída/resgate)
-      const outgoingTransfers = await db
-        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
-        .from(transfers)
-        .where(eq(transfers.fromBoxId, box.id));
-
-      const outgoingAmount = parseFloat(outgoingTransfers[0]?.total || '0');
-
       boxesBalance[box.id] = {
         name: box.name,
-        balance: incomingAmount - outgoingAmount,
+        balance: (incomingMap.get(box.id) || 0) - (outgoingMap.get(box.id) || 0),
       };
     }
 

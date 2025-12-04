@@ -30,7 +30,7 @@ export async function GET(
       return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
     }
 
-    // Calcular balance das caixinhas
+    // Calcular balance das caixinhas (com uma única query)
     const boxes = await db
       .select()
       .from(bankAccountBoxes)
@@ -39,21 +39,37 @@ export async function GET(
         eq(bankAccountBoxes.isActive, true)
       ));
 
+    // Fetch all transfers at once for all boxes
+    const incomingTransfersData = await db
+      .select({
+        boxId: transfers.toBoxId,
+        total: sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`,
+      })
+      .from(transfers)
+      .where(
+        sql`${transfers.toBoxId} IN (${sql.raw(boxes.map(b => `'${b.id}'`).join(',') || "'null'")})`
+      )
+      .groupBy(transfers.toBoxId);
+
+    const outgoingTransfersData = await db
+      .select({
+        boxId: transfers.fromBoxId,
+        total: sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`,
+      })
+      .from(transfers)
+      .where(
+        sql`${transfers.fromBoxId} IN (${sql.raw(boxes.map(b => `'${b.id}'`).join(',') || "'null'")})`
+      )
+      .groupBy(transfers.fromBoxId);
+
+    const incomingMap = new Map(incomingTransfersData.map(t => [t.boxId, t.total || 0]));
+    const outgoingMap = new Map(outgoingTransfersData.map(t => [t.boxId, t.total || 0]));
+
     const boxesBalance: Record<string, { name: string; balance: number }> = {};
     for (const box of boxes) {
-      const incomingTransfers = await db
-        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
-        .from(transfers)
-        .where(eq(transfers.toBoxId, box.id));
-      
-      const outgoingTransfers = await db
-        .select(sql<number>`SUM(CAST(${transfers.amount} AS NUMERIC))`.as('total'))
-        .from(transfers)
-        .where(eq(transfers.fromBoxId, box.id));
-      
       boxesBalance[box.id] = {
         name: box.name,
-        balance: parseFloat(incomingTransfers[0]?.total || '0') - parseFloat(outgoingTransfers[0]?.total || '0'),
+        balance: (incomingMap.get(box.id) || 0) - (outgoingMap.get(box.id) || 0),
       };
     }
 
