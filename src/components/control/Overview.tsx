@@ -37,6 +37,7 @@ interface OverviewData {
     unpaidTransactions: number;
   };
   upcomingInvoicesDetails: UpcomingInvoice[];
+  boxesBalance?: Record<string, { name: string; balance: number }>;
 }
 
 function StatCard({ title, value, icon: Icon, color }: StatCardProps) {
@@ -216,6 +217,23 @@ export function Overview({ controlId }: OverviewProps) {
             </div>
           </Group>
         </Paper>
+
+        {/* Saldos das Caixinhas */}
+        {data.boxesBalance && Object.entries(data.boxesBalance).length > 0 && (
+          <Paper shadow="xs" p="md">
+            <Title order={3} mb="md">🎁 Caixinhas</Title>
+            <Stack gap="xs">
+              {Object.entries(data.boxesBalance).map(([id, box]) => (
+                <Group key={id} justify="space-between" p="xs" style={{ backgroundColor: '#f0fdf4', borderRadius: '4px' }}>
+                  <Text size="sm">{box.name}</Text>
+                  <Text size="sm" fw={600} c={box.balance >= 0 ? 'green' : 'red'}>
+                    R$ {box.balance.toFixed(2)}
+                  </Text>
+                </Group>
+              ))}
+            </Stack>
+          </Paper>
+        )}
 
         {/* Alertas */}
         {(data.alerts.upcomingInvoices > 0 || data.alerts.unpaidTransactions > 0) && (
