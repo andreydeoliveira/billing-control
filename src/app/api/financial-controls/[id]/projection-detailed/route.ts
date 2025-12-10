@@ -78,33 +78,46 @@ export async function GET(
     const now = new Date();
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const balanceMap = new Map<string, number>();
-    // Calcular saldo atual como base (igual à rota account-balances)
+    
+    // Buscar TODAS as transações do mês atual de uma vez (não em loop)
+    const allTxs = await db
+      .select({ amount: monthlyTransactions.actualAmount, type: expenseIncomeAccounts.type, bankAccountId: monthlyTransactions.bankAccountId })
+      .from(monthlyTransactions)
+      .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
+      .where(
+        and(
+          eq(monthlyTransactions.financialControlId, controlId),
+          eq(monthlyTransactions.monthYear, currentMonth),
+          sql`${monthlyTransactions.paidDate} IS NOT NULL`
+        )
+      );
+    
+    // Buscar TODOS os transfers do mês atual de uma vez
+    const allTransfersIn = await db
+      .select({ amount: transfers.amount, fromId: transfers.fromBankAccountId, toBankAccountId: transfers.toBankAccountId })
+      .from(transfers)
+      .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, currentMonth)));
+    
+    const allTransfersOut = await db
+      .select({ amount: transfers.amount, toId: transfers.toBankAccountId, fromBankAccountId: transfers.fromBankAccountId })
+      .from(transfers)
+      .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, currentMonth)));
+    
+    // Calcular saldo para cada conta em memória (sem queries em loop)
     for (const acc of activeAccounts) {
       const initial = parseFloat((acc.initialBalance as unknown as string) || '0');
-      const txs = await db
-        .select({ amount: monthlyTransactions.actualAmount, type: expenseIncomeAccounts.type })
-        .from(monthlyTransactions)
-        .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
-        .where(
-          and(
-            eq(monthlyTransactions.financialControlId, controlId),
-            eq(monthlyTransactions.bankAccountId, acc.id),
-            eq(monthlyTransactions.monthYear, currentMonth),
-            sql`${monthlyTransactions.paidDate} IS NOT NULL`
-          )
-        );
-      const incomeSum = txs.filter(t => t.type === 'income').reduce((s, t) => s + parseFloat(t.amount || '0'), 0);
-      const expenseSum = txs.filter(t => t.type === 'expense').reduce((s, t) => s + parseFloat(t.amount || '0'), 0);
-      const transfersIn = await db
-        .select({ amount: transfers.amount, fromId: transfers.fromBankAccountId })
-        .from(transfers)
-        .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, currentMonth), eq(transfers.toBankAccountId, acc.id)));
-      const transfersOut = await db
-        .select({ amount: transfers.amount, toId: transfers.toBankAccountId })
-        .from(transfers)
-        .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, currentMonth), eq(transfers.fromBankAccountId, acc.id)));
-      const transferInSum = transfersIn.filter(t => t.fromId !== acc.id).reduce((sum, t) => sum + parseFloat(t.amount), 0);
-      const transferOutSum = transfersOut.filter(t => t.toId !== acc.id).reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      const incomeSum = allTxs
+        .filter(t => t.type === 'income' && t.bankAccountId === acc.id)
+        .reduce((s, t) => s + parseFloat(t.amount || '0'), 0);
+      const expenseSum = allTxs
+        .filter(t => t.type === 'expense' && t.bankAccountId === acc.id)
+        .reduce((s, t) => s + parseFloat(t.amount || '0'), 0);
+      const transferInSum = allTransfersIn
+        .filter(t => t.toBankAccountId === acc.id && t.fromId !== acc.id)
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      const transferOutSum = allTransfersOut
+        .filter(t => t.fromBankAccountId === acc.id && t.toId !== acc.id)
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
       const finalBalanceCurrent = initial + incomeSum - expenseSum + transferInSum - transferOutSum;
       balanceMap.set(acc.id as unknown as string, finalBalanceCurrent);
     }
@@ -158,34 +171,17 @@ export async function GET(
 
         // Para o mês atual (i === 0), incluir breakdown de transações pagas e transferências
         if (i === 0) {
-          const txsPaid = await db
-            .select({ amount: monthlyTransactions.actualAmount, type: expenseIncomeAccounts.type, name: (expenseIncomeAccounts as any).name })
-            .from(monthlyTransactions)
-            .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
-            .where(
-              and(
-                eq(monthlyTransactions.financialControlId, controlId),
-                eq(monthlyTransactions.bankAccountId, acc.id),
-                eq(monthlyTransactions.monthYear, currentMonth),
-                sql`${monthlyTransactions.paidDate} IS NOT NULL`
-              )
-            );
+          const txsPaid = allTxs.filter(t => t.bankAccountId === acc.id);
           txsPaid.forEach(t => {
             // Ignorar transações sem tipo (join não encontrou conta associada)
             if (!t.type) return;
             const amt = parseFloat(t.amount || '0');
-            paidTxList.push({ name: (t as any).name || 'Transação', type: t.type, amount: amt });
+            paidTxList.push({ name: 'Transação', type: t.type, amount: amt });
           });
-          const transfersIn = await db
-            .select({ amount: transfers.amount, fromId: transfers.fromBankAccountId })
-            .from(transfers)
-            .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, currentMonth), eq(transfers.toBankAccountId, acc.id)));
-          const transfersOut = await db
-            .select({ amount: transfers.amount, toId: transfers.toBankAccountId })
-            .from(transfers)
-            .where(and(eq(transfers.financialControlId, controlId), eq(transfers.monthYear, currentMonth), eq(transfers.fromBankAccountId, acc.id)));
-          transfersIn.filter(t => t.fromId !== acc.id).forEach(t => transfersList.push({ direction: 'in', amount: parseFloat(t.amount) }));
-          transfersOut.filter(t => t.toId !== acc.id).forEach(t => transfersList.push({ direction: 'out', amount: parseFloat(t.amount) }));
+          const transfersIn = allTransfersIn.filter(t => t.toBankAccountId === acc.id && t.fromId !== acc.id);
+          const transfersOut = allTransfersOut.filter(t => t.fromBankAccountId === acc.id && t.toId !== acc.id);
+          transfersIn.forEach(t => transfersList.push({ direction: 'in', amount: parseFloat(t.amount) }));
+          transfersOut.forEach(t => transfersList.push({ direction: 'out', amount: parseFloat(t.amount) }));
         }
 
         const finalBalance = lastBalance + expectedIncome - expectedExpenses;

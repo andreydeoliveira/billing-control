@@ -49,60 +49,65 @@ export async function GET(
       .where(eq(bankAccountBoxes.financialControlId, controlId))
       .orderBy(bankAccounts.name, bankAccountBoxes.name);
 
-    // Calcular saldo atual de cada caixinha
-    const boxesWithBalance = await Promise.all(
-      boxes.map(async (box) => {
-        // Receitas na caixinha
-        const incomes = await db
-          .select({ actualAmount: monthlyTransactions.actualAmount, type: expenseIncomeAccounts.type })
-          .from(monthlyTransactions)
-          .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
-          .where(
-            and(
-              eq(monthlyTransactions.boxId, box.id),
-              sql`${monthlyTransactions.paidDate} IS NOT NULL`,
-              eq(expenseIncomeAccounts.type, 'income')
-            )
-          );
+    // Buscar TODAS as transações e transferências de uma vez (não em loop)
+    const boxIds = boxes.map(b => `'${b.id}'`).join(',') || "'null'";
+    
+    const allIncomes = await db
+      .select({ boxId: monthlyTransactions.boxId, actualAmount: monthlyTransactions.actualAmount })
+      .from(monthlyTransactions)
+      .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
+      .where(
+        and(
+          sql`${monthlyTransactions.boxId} IN (${sql.raw(boxIds)})`,
+          sql`${monthlyTransactions.paidDate} IS NOT NULL`,
+          eq(expenseIncomeAccounts.type, 'income')
+        )
+      );
 
-        // Despesas na caixinha
-        const expenses = await db
-          .select({ actualAmount: monthlyTransactions.actualAmount, type: expenseIncomeAccounts.type })
-          .from(monthlyTransactions)
-          .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
-          .where(
-            and(
-              eq(monthlyTransactions.boxId, box.id),
-              sql`${monthlyTransactions.paidDate} IS NOT NULL`,
-              eq(expenseIncomeAccounts.type, 'expense')
-            )
-          );
+    const allExpenses = await db
+      .select({ boxId: monthlyTransactions.boxId, actualAmount: monthlyTransactions.actualAmount })
+      .from(monthlyTransactions)
+      .leftJoin(expenseIncomeAccounts, eq(monthlyTransactions.accountId, expenseIncomeAccounts.id))
+      .where(
+        and(
+          sql`${monthlyTransactions.boxId} IN (${sql.raw(boxIds)})`,
+          sql`${monthlyTransactions.paidDate} IS NOT NULL`,
+          eq(expenseIncomeAccounts.type, 'expense')
+        )
+      );
 
-        // Transferências recebidas nesta caixinha
-        const transfersIn = await db
-          .select({ amount: transfers.amount })
-          .from(transfers)
-          .where(eq(transfers.toBoxId, box.id));
+    const allTransfersIn = await db
+      .select({ toBoxId: transfers.toBoxId, amount: transfers.amount })
+      .from(transfers)
+      .where(sql`${transfers.toBoxId} IN (${sql.raw(boxIds)})`);
 
-        // Transferências saídas desta caixinha
-        const transfersOut = await db
-          .select({ amount: transfers.amount })
-          .from(transfers)
-          .where(eq(transfers.fromBoxId, box.id));
+    const allTransfersOut = await db
+      .select({ fromBoxId: transfers.fromBoxId, amount: transfers.amount })
+      .from(transfers)
+      .where(sql`${transfers.fromBoxId} IN (${sql.raw(boxIds)})`);
 
-        const totalIncome = incomes.reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
-        const totalExpense = expenses.reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
-        const totalTransfersIn = transfersIn.reduce((sum, t) => sum + parseFloat(t.amount), 0);
-        const totalTransfersOut = transfersOut.reduce((sum, t) => sum + parseFloat(t.amount), 0);
+    // Calcular saldo usando dados em memória
+    const boxesWithBalance = boxes.map((box) => {
+      const totalIncome = allIncomes
+        .filter(t => t.boxId === box.id)
+        .reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
+      const totalExpense = allExpenses
+        .filter(t => t.boxId === box.id)
+        .reduce((sum, t) => sum + parseFloat(t.actualAmount || '0'), 0);
+      const totalTransfersIn = allTransfersIn
+        .filter(t => t.toBoxId === box.id)
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+      const totalTransfersOut = allTransfersOut
+        .filter(t => t.fromBoxId === box.id)
+        .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 
-        const currentBalance = totalIncome - totalExpense + totalTransfersIn - totalTransfersOut;
+      const currentBalance = totalIncome - totalExpense + totalTransfersIn - totalTransfersOut;
 
-        return {
-          ...box,
-          currentBalance: currentBalance.toFixed(2),
-        };
-      })
-    );
+      return {
+        ...box,
+        currentBalance: currentBalance.toFixed(2),
+      };
+    });
 
     return NextResponse.json(boxesWithBalance);
   } catch (error) {
