@@ -211,7 +211,7 @@ export function CartaoDetalhesClient({
                 <DateInput
                   label="Data do Pagamento"
                   value={dataPagamento}
-                  onChange={(value) => setDataPagamento(value)}
+                  onChange={(value) => setDataPagamento(value ? new Date(value) : null)}
                   valueFormat="DD/MM/YYYY"
                 />
                 <NumberInput
