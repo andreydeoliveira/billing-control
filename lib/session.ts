@@ -59,7 +59,7 @@ export async function getSession() {
       // Limpar sessão expirada do banco
       await prisma.session.delete({ where: { id: sessionId } });
     }
-    await deleteSessionCookie();
+    // Não deletar cookie aqui - isso deve ser feito apenas em Server Actions
     return null;
   }
 
