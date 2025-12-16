@@ -4,11 +4,25 @@ import { AppShell, Group, Button, Burger, Stack, Drawer, Text } from '@mantine/c
 import { useDisclosure } from '@mantine/hooks';
 import { IconHome, IconReceipt, IconFileText, IconChartLine, IconWallet } from '@tabler/icons-react';
 import { usePathname, useRouter } from 'next/navigation';
+import UserInfo from './UserInfo';
 
-export function Layout({ children }: { children: React.ReactNode }) {
+interface LayoutProps {
+  children: React.ReactNode;
+  isAuthenticated?: boolean;
+}
+
+export function Layout({ children, isAuthenticated = false }: LayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [opened, { toggle, close }] = useDisclosure();
+
+  const isAuthPage = pathname?.startsWith('/auth');
+  const showNav = isAuthenticated && !isAuthPage;
+
+  // Não mostrar navegação em páginas de auth ou se não está autenticado
+  if (isAuthPage || !showNav) {
+    return <>{children}</>;
+  }
 
   const menuItems = [
     { label: 'Home', href: '/', icon: IconHome },
@@ -44,13 +58,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
             })}
           </Group>
 
+          {/* Botão Extrato */}
+          <Button
+            onClick={() => router.push('/extrato')}
+            variant={pathname === '/extrato' ? 'light' : 'subtle'}
+            color="cyan"
+            size="sm"
+            visibleFrom="sm"
+          >
+            Extrato
+          </Button>
+
           {/* Mobile - Burger */}
           <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
 
-          {/* Logo - Direita */}
-          <Group gap="xs" ml="auto" visibleFrom="sm">
-            <IconWallet size={24} stroke={2} />
-            <Text size="lg" fw={700}>FinControl</Text>
+          {/* User Info e Logo */}
+          <Group gap="md" ml="auto">
+            <UserInfo />
           </Group>
         </Group>
       </AppShell.Header>
@@ -80,6 +104,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </Button>
             );
           })}
+          <Button
+            variant={pathname === '/extrato' ? 'light' : 'subtle'}
+            onClick={() => handleNavigation('/extrato')}
+            fullWidth
+            justify="flex-start"
+            color="cyan"
+          >
+            Extrato
+          </Button>
         </Stack>
       </Drawer>
 

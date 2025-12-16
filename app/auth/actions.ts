@@ -143,3 +143,73 @@ export async function logout() {
   await deleteSession();
   redirect('/auth/login');
 }
+
+/**
+ * Server Action para trocar senha
+ */
+export async function changePassword(formData: FormData): Promise<AuthResult> {
+  const currentPassword = formData.get('currentPassword') as string;
+  const newPassword = formData.get('newPassword') as string;
+  const confirmPassword = formData.get('confirmPassword') as string;
+
+  // Validações
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    return { success: false, error: 'Todos os campos são obrigatórios' };
+  }
+
+  if (newPassword !== confirmPassword) {
+    return { success: false, error: 'As senhas não coincidem' };
+  }
+
+  if (!isValidPassword(newPassword)) {
+    return { success: false, error: 'A nova senha deve ter no mínimo 12 caracteres, incluindo maiúsculas, minúsculas e números' };
+  }
+
+  try {
+    // Obter usuário atual
+    const session = await prisma.session.findFirst({
+      where: {
+        expiresAt: { gt: new Date() }
+      },
+      include: { user: true },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (!session?.user) {
+      return { success: false, error: 'Sessão inválida. Faça login novamente.' };
+    }
+
+    // Verificar senha atual
+    const isCurrentPasswordValid = await verifyPassword(currentPassword, session.user.passwordHash);
+
+    if (!isCurrentPasswordValid) {
+      return { success: false, error: 'Senha atual incorreta' };
+    }
+
+    // Criar hash da nova senha
+    const newPasswordHash = await hashPassword(newPassword);
+
+    // Atualizar senha no banco
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { passwordHash: newPasswordHash }
+    });
+
+    // Invalidar todas as sessões antigas (força re-login em outros dispositivos)
+    await prisma.session.deleteMany({
+      where: { userId: session.user.id }
+    });
+
+    // Criar nova sessão
+    await createSession(session.user.id);
+
+    return { success: true };
+  } catch (error) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Erro ao trocar senha:', error);
+    } else {
+      console.error('Erro ao trocar senha');
+    }
+    return { success: false, error: 'Erro ao trocar senha. Tente novamente.' };
+  }
+}

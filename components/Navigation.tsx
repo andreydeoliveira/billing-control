@@ -3,11 +3,37 @@
 import { AppShell, Group, Button } from '@mantine/core';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import UserInfo from './UserInfo';
 
-export function Navigation({ children }: { children: React.ReactNode }) {
+interface NavigationProps {
+  children: React.ReactNode;
+  isAuthenticated: boolean;
+}
+
+export function Navigation({ children, isAuthenticated: initialAuth }: NavigationProps) {
   const pathname = usePathname();
+  const [showNav, setShowNav] = useState(false);
 
   const isActive = (path: string) => pathname === path;
+  
+  // Verificar se deve mostrar navegação
+  const isAuthPage = pathname?.startsWith('/auth');
+
+  useEffect(() => {
+    // Só mostrar navegação se estiver autenticado e não estiver em página de auth
+    setShowNav(initialAuth && !isAuthPage);
+  }, [initialAuth, isAuthPage]);
+
+  // Sempre renderizar sem navegação em páginas de auth
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
+
+  // Não mostrar navegação se não estiver autenticado
+  if (!showNav) {
+    return <>{children}</>;
+  }
 
   return (
     <AppShell
@@ -46,6 +72,8 @@ export function Navigation({ children }: { children: React.ReactNode }) {
               Extrato
             </Button>
           </Group>
+          
+          <UserInfo />
         </Group>
       </AppShell.Header>
 

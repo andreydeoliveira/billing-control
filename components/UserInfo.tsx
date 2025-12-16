@@ -1,27 +1,59 @@
-import { getCurrentUser } from '@/lib/session';
+'use client';
+
 import { logout } from '@/app/auth/actions';
+import { getUserData } from '@/app/user/actions';
+import { useEffect, useState } from 'react';
+import { Button, Menu } from '@mantine/core';
+import { usePathname, useRouter } from 'next/navigation';
 
-export default async function UserInfo() {
-  const user = await getCurrentUser();
+export default function UserInfo() {
+  const [user, setUser] = useState<{ name: string | null; email: string } | null>(null);
+  const pathname = usePathname();
+  const router = useRouter();
+  
+  // Não carregar em páginas de auth
+  const isAuthPage = pathname?.startsWith('/auth');
 
-  if (!user) {
+  useEffect(() => {
+    if (isAuthPage) return;
+    
+    // Usar Server Action
+    getUserData().then(setUser).catch(() => setUser(null));
+  }, [isAuthPage]);
+
+  if (isAuthPage || !user) {
     return null;
   }
 
   return (
-    <div className="flex items-center gap-4 p-4 bg-white shadow rounded-lg">
-      <div className="flex-1">
-        <p className="text-sm text-gray-600">Logado como:</p>
-        <p className="font-semibold">{user.name || user.email}</p>
-      </div>
-      <form action={logout}>
-        <button
-          type="submit"
-          className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-        >
-          Sair
-        </button>
-      </form>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <Menu shadow="md" width={200}>
+        <Menu.Target>
+          <Button variant="subtle" size="xs">
+            <span style={{ opacity: 0.7 }}>👤 </span>
+            {user.name || user.email}
+          </Button>
+        </Menu.Target>
+
+        <Menu.Dropdown>
+          <Menu.Label>Conta</Menu.Label>
+          <Menu.Item onClick={() => router.push('/auth/change-password')}>
+            🔑 Trocar Senha
+          </Menu.Item>
+          <Menu.Divider />
+          <Menu.Item 
+            color="red"
+            onClick={() => {
+              const form = document.createElement('form');
+              form.action = '/auth/login';
+              form.method = 'POST';
+              logout();
+            }}
+          >
+            🚪 Sair
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
     </div>
   );
 }

@@ -10,7 +10,7 @@ const PUBLIC_ROUTES = ['/auth/login', '/auth/signup'];
 // Rotas de autenticação que usuários logados não devem acessar
 const AUTH_ROUTES = ['/auth/login', '/auth/signup'];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   
   // Verificar se há cookie de sessão E validar no banco
