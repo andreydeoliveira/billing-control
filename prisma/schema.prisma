@@ -1,0 +1,238 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_URL")
+  directUrl = env("POSTGRES_URL_NON_POOLING")
+}
+
+model Categoria {
+  id         String   @id @default(cuid())
+  nome       String
+  observacao String?
+  status     String   @default("Ativo") // "Ativo" ou "Inativo"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  contas     Conta[]
+}
+
+model Conta {
+  id                  String   @id @default(cuid())
+  nome                String
+  tipo                String   @default("despesa") // "receita" ou "despesa"
+  observacao          String?
+  categoriaId         String
+  categoria           Categoria @relation(fields: [categoriaId], references: [id])
+  status              String   @default("Ativo")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  gastosProvisionados GastoProvisionado[]
+  transacoes          Transacao[]
+}
+
+model ContaBancaria {
+  id                       String   @id @default(cuid())
+  nomeConta                String
+  nomeBanco                String
+  saldoInicial             Float   @default(0)
+  saldo                    Float   @default(0)
+  status                   String   @default("Ativo")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  cartoes                  Cartao[]
+  caixinhas                Caixinha[]
+  gastosProvisionados      GastoProvisionado[]
+  transacoes               Transacao[]
+  transferenciasOrigem     Transacao[] @relation("TransferenciaOrigem")
+  transferenciasDestino    Transacao[] @relation("TransferenciaDestino")
+  faturasPagamentos        FaturaCartao[] @relation("PagamentoFatura")
+}
+
+model Cartao {
+  id                  String   @id @default(cuid())
+  nome                String
+  diaFechamento       Int?
+  diaVencimento       Int?
+  contaBancariaId     String
+  contaBancaria       ContaBancaria @relation(fields: [contaBancariaId], references: [id])
+  status              String   @default("Ativo")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  gastosProvisionados GastoProvisionado[]
+  transacoes          Transacao[]
+  faturas             FaturaCartao[]
+}
+
+model Caixinha {
+  id               String   @id @default(cuid())
+  nome             String
+  valorInicial     Float?
+  saldo            Float    @default(0)
+  contaBancariaId  String
+  contaBancaria    ContaBancaria @relation(fields: [contaBancariaId], references: [id])
+  status           String   @default("Ativo")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  transacoes       Transacao[]
+}
+
+model GastoProvisionado {
+  id                  String   @id @default(cuid())
+  contaId             String
+  conta               Conta @relation(fields: [contaId], references: [id])
+  observacao          String?
+  valorEsperado       Float
+  formaPagamento      String   // "transferencia_pix" ou "cartao_credito"
+  contaBancariaId     String?
+  contaBancaria       ContaBancaria? @relation(fields: [contaBancariaId], references: [id])
+  cartaoId            String?
+  cartao              Cartao? @relation(fields: [cartaoId], references: [id])
+  tipoRecorrencia     String   // "1x", "2x", "3x", etc, "mensal", "anual"
+  dataInicio          DateTime
+  dataFinal           DateTime?
+  status              String   @default("Ativo")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  transacoes          Transacao[]
+  mesesExcluidos      MesExcluido[]
+}
+
+model MesExcluido {
+  id                    String   @id @default(cuid())
+  gastoProvisionadoId   String
+  gastoProvisionado     GastoProvisionado @relation(fields: [gastoProvisionadoId], references: [id], onDelete: Cascade)
+  mes                   Int      // 1-12
+  ano                   Int      // 2025
+  createdAt             DateTime @default(now())
+  
+  @@unique([gastoProvisionadoId, mes, ano])
+}
+
+model Transacao {
+  id                      String   @id @default(cuid())
+  
+  // Dados básicos
+  data                    DateTime
+  mes                     Int      // 1-12
+  ano                     Int      // 2025
+  descricao               String
+  valor                   Float
+  tipo                    String   // "receita", "despesa", "transferencia"
+  
+  // Relacionamento com Conta (categoria)
+  contaId                 String?
+  conta                   Conta? @relation(fields: [contaId], references: [id])
+  
+  // Forma de pagamento
+  formaPagamento          String?  // "transferencia_pix", "cartao_credito", "dinheiro"
+  contaBancariaId         String?
+  contaBancaria           ContaBancaria? @relation(fields: [contaBancariaId], references: [id])
+  cartaoId                String?
+  cartao                  Cartao? @relation(fields: [cartaoId], references: [id])
+  
+  // Caixinha (opcional - se o dinheiro veio de uma caixinha)
+  caixinhaId              String?
+  caixinha                Caixinha? @relation(fields: [caixinhaId], references: [id])
+  
+  // Para transferências entre contas bancárias
+  contaBancariaOrigemId   String?
+  contaBancariaOrigem     ContaBancaria? @relation("TransferenciaOrigem", fields: [contaBancariaOrigemId], references: [id])
+  contaBancariaDestinoId  String?
+  contaBancariaDestino    ContaBancaria? @relation("TransferenciaDestino", fields: [contaBancariaDestinoId], references: [id])
+  
+  // Status e controle
+  status                  String   // "pendente", "confirmado", "pago"
+  valorEsperado           Float?   // Se vier de GastoProvisionado
+  gastoProvisionadoId     String?
+  gastoProvisionado       GastoProvisionado? @relation(fields: [gastoProvisionadoId], references: [id])
+  
+  // Fatura de cartão
+  faturaCartaoId          String?
+  faturaCartao            FaturaCartao? @relation(fields: [faturaCartaoId], references: [id])
+  
+  observacao              String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
+model FaturaCartao {
+  id                      String   @id @default(cuid())
+  cartaoId                String
+  cartao                  Cartao @relation(fields: [cartaoId], references: [id])
+  
+  mes                     Int      // 1-12
+  ano                     Int      // 2025
+  dataFechamento          DateTime
+  dataVencimento          DateTime
+  
+  valorTotal              Float    @default(0)
+  status                  String   // "aberta", "fechada", "paga"
+  
+  // Pagamento da fatura
+  dataPagamento           DateTime?
+  valorPago               Float?
+  contaBancariaPagtoId    String?
+  contaBancariaPagto      ContaBancaria? @relation("PagamentoFatura", fields: [contaBancariaPagtoId], references: [id])
+  
+  transacoes              Transacao[]
+  
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  
+  @@unique([cartaoId, mes, ano])
+}
+
+model LancamentoExtrato {
+  id                  String   @id @default(cuid())
+  
+  // Entidade (ContaBancaria ou Caixinha)
+  contaBancariaId     String?
+  caixinhaId          String?
+  
+  // Referência da transação que originou o lançamento
+  transacaoId         String?
+  descricao           String
+  
+  // Saldo antes e depois
+  saldoAnterior       Float
+  valorMovimento      Float    // Positivo para crédito, negativo para débito
+  saldoNovo           Float
+  
+  // Tipo de operação
+  tipo                String   // "receita", "despesa", "transferencia_saida", "transferencia_entrada", "aporte", "resgate"
+  
+  // Data do lançamento
+  data                DateTime
+  
+  createdAt           DateTime @default(now())
+  
+  @@index([contaBancariaId, data])
+  @@index([caixinhaId, data])
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([userId, expiresAt])
+}
