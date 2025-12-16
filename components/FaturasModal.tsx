@@ -142,7 +142,7 @@ export function FaturasModal({
                         placeholder="Selecione a data"
                         valueFormat="DD/MM/YYYY"
                         value={dataPagamento}
-                        onChange={(value) => setDataPagamento(value || new Date())}
+                        onChange={(value) => setDataPagamento(value ? new Date(value) : new Date())}
                       />
 
                       <Group justify="flex-end">
