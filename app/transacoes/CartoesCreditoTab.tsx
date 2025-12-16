@@ -203,7 +203,7 @@ export function CartoesCreditoTab({
                       <DateInput
                         label="Data do Pagamento"
                         value={dataPagamento}
-                        onChange={setDataPagamento}
+                        onChange={(value) => setDataPagamento(value ? new Date(value) : null)}
                         valueFormat="DD/MM/YYYY"
                       />
                       <NumberInput
