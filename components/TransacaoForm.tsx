@@ -227,7 +227,7 @@ export function TransacaoForm({
                 required
                 {...form.getInputProps('contaBancariaId')}
                 onChange={(value) => {
-                  form.setFieldValue('contaBancariaId', value);
+                  form.setFieldValue('contaBancariaId', value || '');
                   form.setFieldValue('caixinhaId', ''); // Limpar caixinha ao mudar conta
                 }}
               />
