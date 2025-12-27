@@ -1,13 +1,14 @@
 'use client';
 
-import { Table, Badge, Button, Group, Text } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { Table, Badge, Button, Group, Text, Stack } from '@mantine/core';
+import { IconPlus, IconCalculator } from '@tabler/icons-react';
 import { ActionMenu } from '@/components/ActionMenu';
 import { useState } from 'react';
 import { CaixinhaForm } from '@/components/CaixinhaForm';
-import { deleteCaixinha } from '../app/cadastros/actions';
+import { deleteCaixinha, recalcularSaldoCaixinha } from '../app/cadastros/actions';
 import { useRouter } from 'next/navigation';
 import { modals } from '@mantine/modals';
+import { notifications } from '@mantine/notifications';
 import { Caixinha, ContaBancaria } from '@prisma/client';
 
 interface CaixinhaGridProps {
@@ -48,6 +49,41 @@ export function CaixinhaGrid({ caixinhas, contasBancarias, preSelectedContaBanca
     });
   };
 
+  const handleRecalcular = async (id: string, nome: string) => {
+    modals.openConfirmModal({
+      title: 'Recalcular saldo',
+      children: (
+        <Stack gap="sm">
+          <Text size="sm">
+            Deseja recalcular o saldo da caixinha <strong>{nome}</strong> baseado no histórico de transações?
+          </Text>
+          <Text size="sm" c="dimmed">
+            O saldo será recalculado a partir do valor inicial mais todas as transações confirmadas/pagas.
+          </Text>
+        </Stack>
+      ),
+      labels: { confirm: 'Recalcular', cancel: 'Cancelar' },
+      confirmProps: { color: 'blue' },
+      onConfirm: async () => {
+        try {
+          const resultado = await recalcularSaldoCaixinha(id);
+          notifications.show({
+            title: 'Saldo recalculado!',
+            message: `Saldo anterior: ${formatCurrency(resultado.saldoAnterior)} → Novo saldo: ${formatCurrency(resultado.saldoNovo)} (${resultado.transacoesProcessadas} transações processadas)`,
+            color: 'green',
+          });
+          router.refresh();
+        } catch (error) {
+          notifications.show({
+            title: 'Erro ao recalcular',
+            message: (error as Error).message,
+            color: 'red',
+          });
+        }
+      },
+    });
+  };
+
   const formatCurrency = (value: number | null) => {
     if (value === null) return '-';
     return new Intl.NumberFormat('pt-BR', {
@@ -76,7 +112,7 @@ export function CaixinhaGrid({ caixinhas, contasBancarias, preSelectedContaBanca
               <Table.Th>Valor Inicial</Table.Th>
               <Table.Th>Saldo Atual</Table.Th>
               <Table.Th>Status</Table.Th>
-              <Table.Th style={{ width: '80px' }}>Ações</Table.Th>
+              <Table.Th style={{ width: '150px' }}>Ações</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -98,10 +134,21 @@ export function CaixinhaGrid({ caixinhas, contasBancarias, preSelectedContaBanca
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <ActionMenu
-                    onEdit={() => handleEdit(caixinha)}
-                    onDelete={() => handleDelete(caixinha.id, caixinha.nome)}
-                  />
+                  <Group gap="xs">
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="blue"
+                      leftSection={<IconCalculator size={14} />}
+                      onClick={() => handleRecalcular(caixinha.id, caixinha.nome)}
+                    >
+                      Recalcular
+                    </Button>
+                    <ActionMenu
+                      onEdit={() => handleEdit(caixinha)}
+                      onDelete={() => handleDelete(caixinha.id, caixinha.nome)}
+                    />
+                  </Group>
                 </Table.Td>
               </Table.Tr>
             ))}

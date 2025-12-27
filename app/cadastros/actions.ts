@@ -216,10 +216,13 @@ export async function createCaixinha(formData: FormData) {
   const contaBancariaId = formData.get('contaBancariaId') as string;
   const status = formData.get('status') as string;
 
+  const valorInicialNum = valorInicial ? parseFloat(valorInicial) : 0;
+
   await prisma.caixinha.create({
     data: { 
       nome, 
-      valorInicial: valorInicial ? parseFloat(valorInicial) : null,
+      valorInicial: valorInicialNum,
+      saldo: valorInicialNum, // Define o saldo inicial igual ao valor inicial
       contaBancariaId, 
       status 
     }
@@ -253,6 +256,80 @@ export async function deleteCaixinha(id: string) {
   });
 
   revalidatePath('/cadastros');
+}
+
+// Função de migração: corrige o saldo das caixinhas existentes
+export async function corrigirSaldoCaixinhas() {
+  // Busca todas as caixinhas onde o saldo está zerado mas o valorInicial não está
+  const caixinhas = await prisma.caixinha.findMany({
+    where: {
+      OR: [
+        { saldo: 0, valorInicial: { not: 0 } },
+        { saldo: 0, valorInicial: { not: null } }
+      ]
+    }
+  });
+
+  // Atualiza cada caixinha para ter o saldo igual ao valor inicial
+  const updates = caixinhas.map(caixinha => 
+    prisma.caixinha.update({
+      where: { id: caixinha.id },
+      data: { saldo: caixinha.valorInicial || 0 }
+    })
+  );
+
+  await Promise.all(updates);
+
+  revalidatePath('/cadastros');
+  
+  return { corrigidas: caixinhas.length };
+}
+
+// Recalcula o saldo de uma caixinha baseado no histórico de transações
+export async function recalcularSaldoCaixinha(caixinhaId: string) {
+  // Busca a caixinha
+  const caixinha = await prisma.caixinha.findUnique({
+    where: { id: caixinhaId }
+  });
+
+  if (!caixinha) {
+    throw new Error('Caixinha não encontrada');
+  }
+
+  // Busca todas as transações da caixinha
+  const transacoes = await prisma.transacao.findMany({
+    where: { 
+      caixinhaId: caixinhaId,
+      status: { in: ['confirmado', 'pago'] } // Apenas transações confirmadas/pagas
+    },
+    orderBy: { data: 'asc' }
+  });
+
+  // Calcula o saldo: valorInicial + soma das transações
+  // Receitas somam, despesas subtraem
+  let saldoCalculado = caixinha.valorInicial || 0;
+  
+  transacoes.forEach(transacao => {
+    if (transacao.tipo === 'receita') {
+      saldoCalculado += transacao.valor;
+    } else if (transacao.tipo === 'despesa') {
+      saldoCalculado -= transacao.valor;
+    }
+  });
+
+  // Atualiza o saldo da caixinha
+  await prisma.caixinha.update({
+    where: { id: caixinhaId },
+    data: { saldo: saldoCalculado }
+  });
+
+  revalidatePath('/cadastros');
+  
+  return { 
+    saldoAnterior: caixinha.saldo,
+    saldoNovo: saldoCalculado,
+    transacoesProcessadas: transacoes.length
+  };
 }
 
 // ========== GASTOS PROVISIONADOS ==========
