@@ -1,6 +1,6 @@
 'use client';
 
-import { Table, Badge, Button, Text, Stack } from '@mantine/core';
+import { Table, Badge, Button, Group, Text, Stack } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { ActionMenu } from '@/components/ActionMenu';
 import { useState } from 'react';
