@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 
 const StatusSchema = z.enum(["ACTIVE", "INACTIVE"]);
+const BankYieldModeSchema = z.enum(["NONE", "CUMULATIVE", "MONTHLY"]);
 
 const ForecastKindSchema = z.enum(["MONTHLY", "ANNUAL", "INSTALLMENTS", "ONE_TIME"]);
 
@@ -65,6 +66,7 @@ const CreateBankAccountSchema = z.object({
   bank: z.string().trim().min(1).max(80),
   status: StatusSchema,
   balanceCents: z.number().int(),
+  yieldMode: BankYieldModeSchema,
 });
 
 const UpdateBankAccountSchema = CreateBankAccountSchema.extend({
@@ -75,17 +77,39 @@ export async function createBankAccount(formData: FormData) {
   const balanceCents = parseMoneyToCents(formData.get("balance"));
   if (balanceCents === null) return false;
 
+  const initialYieldCents = parseMoneyToCents(formData.get("initialYield"));
+  const initialYieldRecordedAt = parseOptionalDate(formData.get("initialYieldRecordedAt")) ?? new Date();
+  if (initialYieldCents !== null && initialYieldCents < 0) return false;
+
   const parsed = CreateBankAccountSchema.safeParse({
     name: String(formData.get("name") ?? ""),
     bank: String(formData.get("bank") ?? ""),
     status: String(formData.get("status") ?? "ACTIVE"),
     balanceCents,
+    yieldMode: String(formData.get("yieldMode") ?? "NONE"),
   });
 
   if (!parsed.success) return false;
 
-  await prisma.bankAccount.create({
-    data: parsed.data,
+  if (parsed.data.yieldMode === "CUMULATIVE" && initialYieldCents === null) return false;
+
+  await prisma.$transaction(async (tx) => {
+    const acct = await tx.bankAccount.create({
+      data: parsed.data,
+    });
+
+    if (parsed.data.yieldMode === "CUMULATIVE" && initialYieldCents !== null) {
+      await tx.bankAccountYieldRecord.create({
+        data: {
+          bankAccountId: acct.id,
+          mode: parsed.data.yieldMode,
+          month: monthStartUtcFromDate(initialYieldRecordedAt),
+          valueCents: initialYieldCents,
+          deltaCents: 0,
+          recordedAt: initialYieldRecordedAt,
+        },
+      });
+    }
   });
 
   revalidatePath("/cadastros");
@@ -115,27 +139,142 @@ export async function updateBankAccount(formData: FormData) {
   const balanceCents = parseMoneyToCents(formData.get("balance"));
   if (balanceCents === null) return false;
 
+  const initialYieldCents = parseMoneyToCents(formData.get("initialYield"));
+  const initialYieldRecordedAt = parseOptionalDate(formData.get("initialYieldRecordedAt")) ?? new Date();
+  if (initialYieldCents !== null && initialYieldCents < 0) return false;
+
   const parsed = UpdateBankAccountSchema.safeParse({
     id: String(formData.get("id") ?? ""),
     name: String(formData.get("name") ?? ""),
     bank: String(formData.get("bank") ?? ""),
     status: String(formData.get("status") ?? "ACTIVE"),
     balanceCents,
+    yieldMode: String(formData.get("yieldMode") ?? "NONE"),
   });
 
   if (!parsed.success) return false;
 
-  await prisma.bankAccount.update({
-    where: { id: parsed.data.id },
-    data: {
-      name: parsed.data.name,
-      bank: parsed.data.bank,
-      status: parsed.data.status,
-      balanceCents: parsed.data.balanceCents,
-    },
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      const prev = await tx.bankAccount.findUnique({
+        where: { id: parsed.data.id },
+        select: { id: true, yieldMode: true },
+      });
+      if (!prev) throw new Error("notfound");
+
+      await tx.bankAccount.update({
+        where: { id: parsed.data.id },
+        data: {
+          name: parsed.data.name,
+          bank: parsed.data.bank,
+          status: parsed.data.status,
+          balanceCents: parsed.data.balanceCents,
+          yieldMode: parsed.data.yieldMode,
+        },
+      });
+
+      const switchingToCumulative = prev.yieldMode !== "CUMULATIVE" && parsed.data.yieldMode === "CUMULATIVE";
+      if (switchingToCumulative) {
+        if (initialYieldCents === null) throw new Error("missingBaseline");
+
+        await tx.bankAccountYieldRecord.create({
+          data: {
+            bankAccountId: prev.id,
+            mode: "CUMULATIVE",
+            month: monthStartUtcFromDate(initialYieldRecordedAt),
+            valueCents: initialYieldCents,
+            deltaCents: 0,
+            recordedAt: initialYieldRecordedAt,
+          },
+        });
+      }
+    });
+  } catch {
+    return false;
+  }
 
   revalidatePath("/cadastros");
+  return true;
+}
+
+function monthStartUtcFromDate(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+}
+
+const RecordBankYieldSchema = z.object({
+  bankAccountId: z.string().min(1),
+  recordedAt: z.date(),
+  valueCents: z.number().int().min(0),
+});
+
+export async function recordBankYield(formData: FormData) {
+  const recordedAt = parseOptionalDate(formData.get("recordedAt"));
+  if (!recordedAt) return false;
+
+  const valueCents = parseMoneyToCents(formData.get("value"));
+  if (valueCents === null || valueCents < 0) return false;
+
+  const parsed = RecordBankYieldSchema.safeParse({
+    bankAccountId: String(formData.get("bankAccountId") ?? ""),
+    recordedAt,
+    valueCents,
+  });
+  if (!parsed.success) return false;
+
+  const month = monthStartUtcFromDate(parsed.data.recordedAt);
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const acct = await tx.bankAccount.findUnique({
+        where: { id: parsed.data.bankAccountId },
+        select: { id: true, yieldMode: true },
+      });
+      if (!acct) throw new Error("notfound");
+      if (acct.yieldMode === "NONE") throw new Error("disabled");
+
+      const mode = acct.yieldMode;
+
+      let deltaCents = 0;
+
+      if (mode === "CUMULATIVE") {
+        const prevCumulative = await tx.bankAccountYieldRecord.findFirst({
+          where: { bankAccountId: acct.id, mode: "CUMULATIVE" },
+          orderBy: { recordedAt: "desc" },
+          select: { valueCents: true },
+        });
+
+        // First cumulative record is a baseline: do not change balance.
+        if (prevCumulative && parsed.data.valueCents < prevCumulative.valueCents) throw new Error("decreasingTotal");
+        deltaCents = prevCumulative ? parsed.data.valueCents - prevCumulative.valueCents : 0;
+      } else {
+        // MONTHLY: valueCents is the yield amount for the month entry (incremental).
+        deltaCents = parsed.data.valueCents;
+      }
+
+      await tx.bankAccountYieldRecord.create({
+        data: {
+          bankAccountId: acct.id,
+          mode,
+          month,
+          valueCents: parsed.data.valueCents,
+          deltaCents,
+          recordedAt: parsed.data.recordedAt,
+        },
+      });
+
+      if (deltaCents !== 0) {
+        await tx.bankAccount.update({
+          where: { id: acct.id },
+          data: { balanceCents: { increment: deltaCents } },
+        });
+      }
+    });
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/cadastros");
+  revalidatePath("/lancamentos");
   return true;
 }
 
@@ -206,6 +345,16 @@ const CreateUtilityAccountSchema = z.object({
   status: StatusSchema,
 });
 
+const CreateIncomeSourceSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  observation: z.string().trim().max(200).optional(),
+  status: StatusSchema,
+});
+
+const UpdateIncomeSourceSchema = CreateIncomeSourceSchema.extend({
+  id: z.string().min(1),
+});
+
 const UpdateUtilityAccountSchema = CreateUtilityAccountSchema.extend({
   id: z.string().min(1),
 });
@@ -263,6 +412,195 @@ export async function updateUtilityAccount(formData: FormData) {
       observation: parsed.data.observation,
       status: parsed.data.status,
     },
+  });
+
+  revalidatePath("/cadastros");
+  return true;
+}
+
+export async function createIncomeSource(formData: FormData) {
+  const observationRaw = String(formData.get("observation") ?? "").trim();
+
+  const parsed = CreateIncomeSourceSchema.safeParse({
+    name: String(formData.get("name") ?? ""),
+    observation: observationRaw.length ? observationRaw : undefined,
+    status: String(formData.get("status") ?? "ACTIVE"),
+  });
+
+  if (!parsed.success) return false;
+
+  await prisma.incomeSource.create({
+    data: parsed.data,
+  });
+
+  revalidatePath("/cadastros");
+  return true;
+}
+
+export async function updateIncomeSource(formData: FormData) {
+  const observationRaw = String(formData.get("observation") ?? "").trim();
+
+  const parsed = UpdateIncomeSourceSchema.safeParse({
+    id: String(formData.get("id") ?? ""),
+    name: String(formData.get("name") ?? ""),
+    observation: observationRaw.length ? observationRaw : undefined,
+    status: String(formData.get("status") ?? "ACTIVE"),
+  });
+
+  if (!parsed.success) return false;
+
+  await prisma.incomeSource.update({
+    where: { id: parsed.data.id },
+    data: {
+      name: parsed.data.name,
+      observation: parsed.data.observation,
+      status: parsed.data.status,
+    },
+  });
+
+  revalidatePath("/cadastros");
+  return true;
+}
+
+export async function deleteIncomeSource(formData: FormData) {
+  const parsed = DeleteSchema.safeParse({
+    id: String(formData.get("id") ?? ""),
+  });
+
+  if (!parsed.success) return false;
+
+  await prisma.incomeSource.delete({
+    where: { id: parsed.data.id },
+  });
+
+  revalidatePath("/cadastros");
+  return true;
+}
+
+const CreateIncomeForecastSchema = z.object({
+  incomeSourceId: z.string().min(1),
+  bankAccountId: z.string().min(1),
+  amountCents: z.number().int().positive(),
+  kind: ForecastKindSchema,
+  startsAt: z.date().optional(),
+  dueDay: z.number().int().min(1).max(31).optional(),
+  installmentsTotal: z.number().int().min(1).max(120).optional(),
+  oneTimeAt: z.date().optional(),
+  observation: z.string().trim().max(200).optional(),
+  status: StatusSchema,
+});
+
+const UpdateIncomeForecastSchema = CreateIncomeForecastSchema.extend({
+  id: z.string().min(1),
+});
+
+export async function createIncomeForecast(formData: FormData) {
+  const amountCents = parseMoneyToCents(formData.get("amount"));
+  if (amountCents === null || amountCents <= 0) return false;
+
+  const kind = String(formData.get("kind") ?? "MONTHLY");
+  const startsAtMonth = parseOptionalYearMonth(formData.get("startsAtMonth"));
+  const startsAtDate = parseOptionalDate(formData.get("startsAtDate"));
+  const oneTimeAt = parseOptionalDate(formData.get("oneTimeAt"));
+  const dueDay = parseOptionalInt(formData.get("dueDay"));
+  const installmentsTotal = parseOptionalInt(formData.get("installmentsTotal"));
+  const observationRaw = String(formData.get("observation") ?? "").trim();
+
+  const startsAt = kind === "INSTALLMENTS" ? startsAtDate : startsAtMonth;
+
+  const parsed = CreateIncomeForecastSchema.safeParse({
+    incomeSourceId: String(formData.get("incomeSourceId") ?? ""),
+    bankAccountId: String(formData.get("bankAccountId") ?? ""),
+    amountCents,
+    kind,
+    startsAt: startsAt ?? undefined,
+    dueDay: dueDay ?? undefined,
+    installmentsTotal: installmentsTotal ?? undefined,
+    oneTimeAt: oneTimeAt ?? undefined,
+    observation: observationRaw.length ? observationRaw : undefined,
+    status: String(formData.get("status") ?? "ACTIVE"),
+  });
+
+  if (!parsed.success) return false;
+
+  await prisma.incomeForecast.create({
+    data: {
+      incomeSourceId: parsed.data.incomeSourceId,
+      bankAccountId: parsed.data.bankAccountId,
+      amountCents: parsed.data.amountCents,
+      kind: parsed.data.kind,
+      startsAt: parsed.data.startsAt,
+      dueDay: parsed.data.dueDay,
+      installmentsTotal: parsed.data.installmentsTotal,
+      oneTimeAt: parsed.data.oneTimeAt,
+      observation: parsed.data.observation,
+      status: parsed.data.status,
+    },
+  });
+
+  revalidatePath("/cadastros");
+  return true;
+}
+
+export async function updateIncomeForecast(formData: FormData) {
+  const amountCents = parseMoneyToCents(formData.get("amount"));
+  if (amountCents === null || amountCents <= 0) return false;
+
+  const kind = String(formData.get("kind") ?? "MONTHLY");
+  const startsAtMonth = parseOptionalYearMonth(formData.get("startsAtMonth"));
+  const startsAtDate = parseOptionalDate(formData.get("startsAtDate"));
+  const oneTimeAt = parseOptionalDate(formData.get("oneTimeAt"));
+  const dueDay = parseOptionalInt(formData.get("dueDay"));
+  const installmentsTotal = parseOptionalInt(formData.get("installmentsTotal"));
+  const observationRaw = String(formData.get("observation") ?? "").trim();
+
+  const startsAt = kind === "INSTALLMENTS" ? startsAtDate : startsAtMonth;
+
+  const parsed = UpdateIncomeForecastSchema.safeParse({
+    id: String(formData.get("id") ?? ""),
+    incomeSourceId: String(formData.get("incomeSourceId") ?? ""),
+    bankAccountId: String(formData.get("bankAccountId") ?? ""),
+    amountCents,
+    kind,
+    startsAt: startsAt ?? undefined,
+    dueDay: dueDay ?? undefined,
+    installmentsTotal: installmentsTotal ?? undefined,
+    oneTimeAt: oneTimeAt ?? undefined,
+    observation: observationRaw.length ? observationRaw : undefined,
+    status: String(formData.get("status") ?? "ACTIVE"),
+  });
+
+  if (!parsed.success) return false;
+
+  await prisma.incomeForecast.update({
+    where: { id: parsed.data.id },
+    data: {
+      incomeSourceId: parsed.data.incomeSourceId,
+      bankAccountId: parsed.data.bankAccountId,
+      amountCents: parsed.data.amountCents,
+      kind: parsed.data.kind,
+      startsAt: parsed.data.startsAt,
+      dueDay: parsed.data.dueDay,
+      installmentsTotal: parsed.data.installmentsTotal,
+      oneTimeAt: parsed.data.oneTimeAt,
+      observation: parsed.data.observation,
+      status: parsed.data.status,
+    },
+  });
+
+  revalidatePath("/cadastros");
+  return true;
+}
+
+export async function deleteIncomeForecast(formData: FormData) {
+  const parsed = DeleteSchema.safeParse({
+    id: String(formData.get("id") ?? ""),
+  });
+
+  if (!parsed.success) return false;
+
+  await prisma.incomeForecast.delete({
+    where: { id: parsed.data.id },
   });
 
   revalidatePath("/cadastros");

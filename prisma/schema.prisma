@@ -21,6 +21,12 @@ enum Status {
   INACTIVE
 }
 
+enum BankYieldMode {
+  NONE
+  CUMULATIVE
+  MONTHLY
+}
+
 enum ForecastKind {
   MONTHLY
   ANNUAL
@@ -51,16 +57,133 @@ model BankAccount {
 
   balanceCents Int @default(0)
 
+  yieldMode BankYieldMode @default(NONE)
+
+  utilityPayments UtilityPayment[]
+  invoicePayments CreditCardInvoicePayment[]
+  manualCharges   ManualCharge[]
+  incomeReceipts  IncomeReceipt[]
+  incomeForecasts IncomeForecast[]
+  yieldRecords    BankAccountYieldRecord[]
+  transfersFrom   BankTransfer[] @relation("TransferFrom")
+  transfersTo     BankTransfer[] @relation("TransferTo")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
 }
 
+model BankAccountYieldRecord {
+  id String @id @default(cuid())
+
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  mode BankYieldMode
+
+  // Use the 1st day of the month (UTC) to represent the period.
+  month DateTime
+
+  // Value semantics:
+  // - CUMULATIVE: total yield accumulated (lifetime) at recordedAt
+  // - MONTHLY: total yield for that month so far at recordedAt
+  valueCents Int
+
+  // Applied to balance: delta compared with previous record in scope.
+  deltaCents Int
+
+  recordedAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bankAccountId, recordedAt])
+  @@index([bankAccountId, month, recordedAt])
+}
+
+model IncomeSource {
+  id          String @id @default(cuid())
+  name        String
+  observation String?
+  status      Status @default(ACTIVE)
+
+  forecasts IncomeForecast[]
+  receipts  IncomeReceipt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model IncomeForecast {
+  id             String       @id @default(cuid())
+  incomeSourceId String
+  incomeSource   IncomeSource @relation(fields: [incomeSourceId], references: [id], onDelete: Cascade)
+
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
+
+  amountCents Int
+  kind       ForecastKind
+
+  // MONTHLY/ANNUAL: startsAtMonth is represented by startsAt (use the 1st day of the month)
+  // INSTALLMENTS: startsAt is a full date
+  startsAt          DateTime?
+  dueDay            Int?
+  installmentsTotal Int?
+  oneTimeAt         DateTime?
+
+  observation String?
+  status      Status @default(ACTIVE)
+
+  receipts IncomeReceipt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([incomeSourceId])
+  @@index([bankAccountId])
+  @@index([status])
+}
+
+model IncomeReceipt {
+  id String @id @default(cuid())
+
+  incomeForecastId String
+  incomeForecast   IncomeForecast @relation(fields: [incomeForecastId], references: [id], onDelete: Cascade)
+
+  incomeSourceId String
+  incomeSource   IncomeSource @relation(fields: [incomeSourceId], references: [id], onDelete: Cascade)
+
+  // Use the 1st day of the month (UTC) to represent the period.
+  month DateTime
+
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  amountCents Int
+  receivedAt  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([incomeForecastId, month])
+  @@index([month])
+  @@index([incomeSourceId, month])
+  @@index([bankAccountId, receivedAt])
+}
+
 model CreditCard {
   id     String @id @default(cuid())
   name   String
   status Status @default(ACTIVE)
+
+  forecastAssignments ForecastCardAssignment[]
+  invoicePayments     CreditCardInvoicePayment[]
+
+  manualCharges ManualCharge[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -100,9 +223,150 @@ model Forecast {
   observation String?
   status      Status @default(ACTIVE)
 
+  cardAssignments ForecastCardAssignment[]
+  payments        UtilityPayment[]
+  monthOverrides  ForecastMonthOverride[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([utilityAccountId])
   @@index([status])
+}
+
+model ForecastMonthOverride {
+  id String @id @default(cuid())
+
+  forecastId String
+  forecast   Forecast @relation(fields: [forecastId], references: [id], onDelete: Cascade)
+
+  // Use the 1st day of the month (UTC) to represent the period.
+  month DateTime
+
+  // If true, this forecast occurrence is ignored for this month.
+  skipped Boolean @default(false)
+
+  // Optional confirmation for items that go through credit card invoice.
+  cardConfirmedAmountCents Int?
+  cardConfirmedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([forecastId, month])
+  @@index([month])
+}
+
+model ForecastCardAssignment {
+  id String @id @default(cuid())
+
+  forecastId String
+  forecast   Forecast @relation(fields: [forecastId], references: [id], onDelete: Cascade)
+
+  // Use the 1st day of the month (UTC) to represent the period.
+  month DateTime
+
+  creditCardId String
+  creditCard   CreditCard @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([forecastId, month])
+  @@index([month])
+  @@index([creditCardId, month])
+}
+
+model UtilityPayment {
+  id String @id @default(cuid())
+
+  forecastId String
+  forecast   Forecast @relation(fields: [forecastId], references: [id], onDelete: Cascade)
+
+  // Use the 1st day of the month (UTC) to represent the period.
+  month DateTime
+
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  amountCents Int
+  paidAt      DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([forecastId, month])
+  @@index([month])
+  @@index([bankAccountId, paidAt])
+}
+
+model CreditCardInvoicePayment {
+  id String @id @default(cuid())
+
+  creditCardId String
+  creditCard   CreditCard @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+
+  // Use the 1st day of the month (UTC) to represent the period.
+  month DateTime
+
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
+
+  amountCents Int
+  paidAt      DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([creditCardId, month])
+  @@index([month])
+  @@index([bankAccountId, paidAt])
+}
+
+model BankTransfer {
+  id String @id @default(cuid())
+
+  fromBankAccountId String
+  fromBankAccount   BankAccount @relation("TransferFrom", fields: [fromBankAccountId], references: [id])
+
+  toBankAccountId String
+  toBankAccount   BankAccount @relation("TransferTo", fields: [toBankAccountId], references: [id])
+
+  amountCents Int
+  transferAt  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([transferAt])
+  @@index([fromBankAccountId])
+  @@index([toBankAccountId])
+}
+
+model ManualCharge {
+  id String @id @default(cuid())
+
+  // Use the 1st day of the month (UTC) to represent the period.
+  month DateTime
+
+  description String
+  amountCents  Int
+  dueDay       Int?
+
+  // When set, this charge belongs to the credit card invoice of the month.
+  creditCardId String?
+  creditCard   CreditCard? @relation(fields: [creditCardId], references: [id], onDelete: SetNull)
+
+  // When set, it was paid directly from a bank account.
+  paidAt        DateTime?
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id])
+  paidAmountCents Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([month])
+  @@index([creditCardId, month])
+  @@index([bankAccountId, paidAt])
 }

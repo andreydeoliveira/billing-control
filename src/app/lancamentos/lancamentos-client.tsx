@@ -1,0 +1,1620 @@
+"use client";
+
+import * as React from "react";
+import { useRouter } from "next/navigation";
+
+import { Combobox } from "@/components/combobox";
+
+import {
+  assignForecastToCard,
+  assignManualChargeToCard,
+  confirmCardForecastAmount,
+  createBankTransfer,
+  createManualCharge,
+  deleteManualCharge,
+  payCreditCardInvoice,
+  payManualCharge,
+  payUtilityForecast,
+  receiveIncomeForecast,
+  skipForecastForMonth,
+  undoIncomeReceipt,
+  undoManualChargePayment,
+  undoUtilityForecastPayment,
+  unassignForecastFromCard,
+  unassignManualChargeFromCard,
+  unconfirmCardForecastAmount,
+} from "@/app/actions/lancamentos";
+
+type BankAccount = {
+  id: string;
+  name: string;
+};
+
+type CreditCard = {
+  id: string;
+  name: string;
+};
+
+type UtilityAccount = {
+  id: string;
+  name: string;
+};
+
+type ForecastChoice = {
+  forecastId: string;
+  utilityAccountId: string;
+  label: string;
+  amountCents: number;
+  dueDay: number | null;
+  paid: boolean;
+  onCard: boolean;
+};
+
+type IncomeItem = {
+  incomeForecastId: string;
+  label: string;
+  bankAccountId: string | null;
+  bankAccountName: string | null;
+  amountCents: number;
+  dueDay: number | null;
+  received: boolean;
+  receivedAmountCents: number | null;
+  receivedAt: string | null; // YYYY-MM-DD
+  receivedBankAccountName: string | null;
+};
+
+type DirectItem =
+  | {
+      kind: "forecast";
+      forecastId: string;
+      label: string;
+      amountCents: number;
+      dueDay: number | null;
+      paid: boolean;
+    }
+  | {
+      kind: "manual";
+      manualChargeId: string;
+      label: string;
+      amountCents: number;
+      dueDay: number | null;
+      paid: boolean;
+      paidAmountCents: number | null;
+    };
+
+type CardItem =
+  | {
+      kind: "forecast";
+      forecastId: string;
+      label: string;
+      amountCents: number;
+      originalAmountCents: number;
+      dueDay: number | null;
+      confirmedAmountCents: number | null;
+      confirmedAt: string | null; // YYYY-MM-DD
+    }
+  | {
+      kind: "manual";
+      manualChargeId: string;
+      label: string;
+      amountCents: number;
+      dueDay: number | null;
+    };
+
+type CardGroup = {
+  creditCardId: string;
+  creditCardName: string;
+  totalCents: number;
+  items: CardItem[];
+  unconfirmedForecastCount: number;
+  paid: boolean;
+  paidAmountCents: number | null;
+};
+
+type MovementLogItem = {
+  id: string;
+  date: string; // YYYY-MM-DD
+  fromBankAccountName: string;
+  toBankAccountName: string;
+  amountCents: number;
+};
+
+type MonthSummary = {
+  plannedIncomeCents: number;
+  plannedExpenseCents: number;
+  plannedNetCents: number;
+  realizedIncomeCents: number;
+  realizedExpenseCents: number;
+  realizedNetCents: number;
+  deltaNetCents: number;
+};
+
+function formatCents(cents: number): string {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(cents / 100);
+}
+
+function formatSignedCents(cents: number): string {
+  const abs = Math.abs(cents);
+  const prefix = cents > 0 ? "+" : cents < 0 ? "-" : "";
+  return `${prefix}${formatCents(abs)}`;
+}
+
+function parseMoneyToCents(raw: unknown): number | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+
+  const hasDot = s.includes(".");
+  const hasComma = s.includes(",");
+  const lastDot = s.lastIndexOf(".");
+  const lastComma = s.lastIndexOf(",");
+  const decimalIsComma = hasComma && (!hasDot || lastComma > lastDot);
+
+  const normalized = decimalIsComma ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+  const value = Number(normalized);
+  if (!Number.isFinite(value)) return null;
+  const cents = Math.round(value * 100);
+  if (!Number.isFinite(cents)) return null;
+  return cents;
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function todayIsoDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function ModalShell({
+  title,
+  children,
+  onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      const root = contentRef.current;
+      if (!root) return;
+
+      const preferred = root.querySelector<HTMLElement>("[data-autofocus]");
+      if (preferred) {
+        preferred.focus();
+        return;
+      }
+
+      const first = root.querySelector<HTMLElement>(
+        "input:not([type='hidden']):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])",
+      );
+      first?.focus();
+    }, 0);
+
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button type="button" aria-label="Fechar" onClick={onClose} className="absolute inset-0 bg-black/40" />
+      <div className="relative w-full max-w-xl rounded-2xl border border-black/10 bg-background p-5 shadow-sm dark:border-white/10">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-base font-semibold">{title}</div>
+            <div className="text-sm text-zinc-600 dark:text-zinc-400">Preencha e confirme.</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+          >
+            Fechar
+          </button>
+        </div>
+
+        <div ref={contentRef} className="mt-5">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type MoveToCardModalState =
+  | { open: false }
+  | {
+      open: true;
+      item: DirectItem;
+    };
+
+type PayUtilityModalState =
+  | { open: false }
+  | {
+      open: true;
+      item: DirectItem;
+    };
+
+type NewChargeModalState =
+  | { open: false }
+  | {
+      open: true;
+    };
+
+type ManageCardModalState =
+  | { open: false }
+  | {
+      open: true;
+      creditCardId: string;
+      creditCardName: string;
+      items: CardItem[];
+    };
+
+type ConfirmCardItemModalState =
+  | { open: false }
+  | {
+      open: true;
+      forecastId: string;
+      label: string;
+      amountCents: number;
+      originalAmountCents: number;
+      confirmedAmountCents: number | null;
+      confirmedAt: string | null;
+    };
+
+type PayInvoiceModalState =
+  | { open: false }
+  | {
+      open: true;
+      creditCardId: string;
+      creditCardName: string;
+      totalCents: number;
+      unconfirmedForecastCount: number;
+    };
+
+type ReceiveIncomeModalState =
+  | { open: false }
+  | {
+      open: true;
+      item: IncomeItem;
+    };
+
+type TransferModalState =
+  | { open: false }
+  | {
+      open: true;
+    };
+
+export function LancamentosClient({
+  month,
+  monthSummary,
+  bankAccounts,
+  creditCards,
+  utilityAccounts,
+  incomeItems,
+  forecastChoices,
+  directItems,
+  cardGroups,
+  movementLog,
+}: {
+  month: string; // YYYY-MM
+  monthSummary: MonthSummary;
+  bankAccounts: BankAccount[];
+  creditCards: CreditCard[];
+  utilityAccounts: UtilityAccount[];
+  incomeItems: IncomeItem[];
+  forecastChoices: ForecastChoice[];
+  directItems: DirectItem[];
+  cardGroups: CardGroup[];
+  movementLog: MovementLogItem[];
+}) {
+  const router = useRouter();
+
+  const [moveToCardModal, setMoveToCardModal] = React.useState<MoveToCardModalState>({ open: false });
+  const [newChargeModal, setNewChargeModal] = React.useState<NewChargeModalState>({ open: false });
+  const [newChargePaymentKind, setNewChargePaymentKind] = React.useState<"bank" | "card">("bank");
+  const [newChargeUtilityAccountId, setNewChargeUtilityAccountId] = React.useState<string>("");
+  const [newChargeAmount, setNewChargeAmount] = React.useState<string>("");
+
+  const [payUtilityModal, setPayUtilityModal] = React.useState<PayUtilityModalState>({ open: false });
+  const [manageCardModal, setManageCardModal] = React.useState<ManageCardModalState>({ open: false });
+  const [confirmCardItemModal, setConfirmCardItemModal] = React.useState<ConfirmCardItemModalState>({ open: false });
+  const [payInvoiceModal, setPayInvoiceModal] = React.useState<PayInvoiceModalState>({ open: false });
+  const [receiveIncomeModal, setReceiveIncomeModal] = React.useState<ReceiveIncomeModalState>({ open: false });
+  const [transferModal, setTransferModal] = React.useState<TransferModalState>({ open: false });
+
+  const bestForecastForUtility = React.useMemo(() => {
+    const map = new Map<string, { usable: ForecastChoice | null; paid: boolean; onCard: boolean }>();
+    for (const u of utilityAccounts) map.set(u.id, { usable: null, paid: false, onCard: false });
+
+    for (const f of forecastChoices) {
+      const cur = map.get(f.utilityAccountId) ?? { usable: null, paid: false, onCard: false };
+      if (f.paid) cur.paid = true;
+      if (f.onCard) cur.onCard = true;
+      if (!f.paid && !f.onCard && !cur.usable) cur.usable = f;
+      map.set(f.utilityAccountId, cur);
+    }
+
+    return map;
+  }, [forecastChoices, utilityAccounts]);
+
+  const hasUsableForecastForSelected = Boolean(bestForecastForUtility.get(newChargeUtilityAccountId)?.usable);
+
+  React.useEffect(() => {
+    if (!newChargeModal.open) return;
+    setNewChargePaymentKind(bankAccounts.length > 0 ? "bank" : "card");
+
+    // Always start blank; user chooses the account.
+    setNewChargeUtilityAccountId("");
+    setNewChargeAmount("");
+  }, [newChargeModal.open, bankAccounts.length]);
+
+  async function runAction(action: (fd: FormData) => Promise<boolean>, fd: FormData) {
+    const ok = await action(fd);
+    if (ok) router.refresh();
+    return ok;
+  }
+
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Lançamentos</h1>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">Previsões do mês, faturas e pagamentos.</p>
+        </div>
+
+        <div className="flex items-end gap-3">
+          <label className="grid gap-1">
+            <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Mês</span>
+            <input
+              type="month"
+              value={month}
+              onChange={(e) => {
+                const next = e.target.value;
+                router.replace(`/lancamentos?month=${next}`);
+              }}
+              className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => setNewChargeModal({ open: true })}
+            className="h-10 rounded-lg px-4 text-sm font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+          >
+            Novo lançamento
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTransferModal({ open: true })}
+            className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90"
+          >
+            Transferir
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-black/10 bg-black/5 p-4 dark:border-white/10 dark:bg-white/10">
+        <div className="text-sm font-medium">Dentro do previsto: {formatSignedCents(monthSummary.plannedNetCents)}</div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="text-sm font-semibold">Entradas do mês</div>
+        <div className="overflow-hidden rounded-2xl border border-black/10 dark:border-white/10">
+          <table className="w-full text-sm">
+            <thead className="bg-black/5 text-left text-xs font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
+              <tr>
+                <th className="px-4 py-3">Fonte</th>
+                <th className="px-4 py-3">Dia</th>
+                <th className="px-4 py-3">Valor previsto</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {incomeItems.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={5}>
+                    Nenhuma entrada prevista neste mês.
+                  </td>
+                </tr>
+              ) : (
+                incomeItems.map((it) => (
+                  <tr key={it.incomeForecastId} className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-4 py-3">{it.label}</td>
+                    <td className="px-4 py-3">{it.dueDay ? String(it.dueDay) : "-"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col">
+                        <span className="font-medium">{formatCents(it.amountCents)}</span>
+                        {it.received && it.receivedAmountCents !== null && it.receivedAmountCents !== it.amountCents ? (
+                          <span className="text-xs text-zinc-600 dark:text-zinc-400">Recebido: {formatCents(it.receivedAmountCents)}</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {it.received ? (
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                          Recebido{it.receivedBankAccountName ? ` (${it.receivedBankAccountName})` : ""}
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">Em aberto</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        {it.received ? (
+                          <form
+                            action={async () => {
+                              await runAction(
+                                undoIncomeReceipt,
+                                (() => {
+                                  const x = new FormData();
+                                  x.set("incomeForecastId", it.incomeForecastId);
+                                  x.set("month", month);
+                                  return x;
+                                })(),
+                              );
+                            }}
+                          >
+                            <button
+                              type="submit"
+                              className="rounded-lg bg-black px-3 py-2 text-xs font-medium text-white hover:bg-black/90"
+                            >
+                              Desfazer recebimento
+                            </button>
+                          </form>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={bankAccounts.length === 0}
+                            onClick={() => setReceiveIncomeModal({ open: true, item: it })}
+                            className={
+                              bankAccounts.length === 0
+                                ? "rounded-lg px-3 py-2 text-xs font-medium text-zinc-400"
+                                : "rounded-lg bg-black px-3 py-2 text-xs font-medium text-white hover:bg-black/90"
+                            }
+                          >
+                            Receber
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="text-sm font-semibold">Contas do mês</div>
+        <div className="overflow-hidden rounded-2xl border border-black/10 dark:border-white/10">
+          <table className="w-full text-sm">
+            <thead className="bg-black/5 text-left text-xs font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
+              <tr>
+                <th className="px-4 py-3">Conta</th>
+                <th className="px-4 py-3">Venc.</th>
+                <th className="px-4 py-3">Valor previsto</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {directItems.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={5}>
+                    Nenhuma previsão direta neste mês.
+                  </td>
+                </tr>
+              ) : (
+                directItems.map((it) => (
+                  <tr
+                    key={it.kind === "forecast" ? it.forecastId : it.manualChargeId}
+                    className="border-t border-black/10 dark:border-white/10"
+                  >
+                    <td className="px-4 py-3">{it.label}</td>
+                    <td className="px-4 py-3">{it.dueDay ? String(it.dueDay) : "-"}</td>
+                    <td className="px-4 py-3 font-medium">{formatCents(it.amountCents)}</td>
+                    <td className="px-4 py-3">
+                      {it.paid ? (
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">Pago</span>
+                      ) : (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">Em aberto</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        {it.paid ? (
+                          <form
+                            action={async () => {
+                              if (it.kind === "forecast") {
+                                await runAction(
+                                  undoUtilityForecastPayment,
+                                  (() => {
+                                    const x = new FormData();
+                                    x.set("forecastId", it.forecastId);
+                                    x.set("month", month);
+                                    return x;
+                                  })(),
+                                );
+                              } else {
+                                await runAction(
+                                  undoManualChargePayment,
+                                  (() => {
+                                    const x = new FormData();
+                                    x.set("manualChargeId", it.manualChargeId);
+                                    return x;
+                                  })(),
+                                );
+                              }
+                            }}
+                          >
+                            <button
+                              type="submit"
+                              className="rounded-lg bg-black px-3 py-2 text-xs font-medium text-white hover:bg-black/90"
+                            >
+                              Desfazer pagamento
+                            </button>
+                          </form>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled={bankAccounts.length === 0}
+                              onClick={() => setPayUtilityModal({ open: true, item: it })}
+                              className={
+                                bankAccounts.length === 0
+                                  ? "rounded-lg px-3 py-2 text-xs font-medium text-zinc-400"
+                                  : "rounded-lg bg-black px-3 py-2 text-xs font-medium text-white hover:bg-black/90"
+                              }
+                            >
+                              Pagar
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={creditCards.length === 0}
+                              onClick={() => setMoveToCardModal({ open: true, item: it })}
+                              className={
+                                creditCards.length === 0
+                                  ? "rounded-lg px-3 py-2 text-xs font-medium text-zinc-400"
+                                  : "rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                              }
+                            >
+                              Mover p/ cartão
+                            </button>
+
+                            {it.kind === "forecast" ? (
+                              <form
+                                action={async () => {
+                                  await runAction(
+                                    skipForecastForMonth,
+                                    (() => {
+                                      const x = new FormData();
+                                      x.set("forecastId", it.forecastId);
+                                      x.set("month", month);
+                                      return x;
+                                    })(),
+                                  );
+                                }}
+                              >
+                                <button
+                                  type="submit"
+                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                >
+                                  Remover do mês
+                                </button>
+                              </form>
+                            ) : null}
+
+                            {it.kind === "manual" ? (
+                              <form
+                                action={async (fd) => {
+                                  fd.set("id", it.manualChargeId);
+                                  await runAction(deleteManualCharge, fd);
+                                }}
+                              >
+                                <button
+                                  type="submit"
+                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                >
+                                  Remover do mês
+                                </button>
+                              </form>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="text-sm font-semibold">Cartões (fatura)</div>
+        <div className="overflow-hidden rounded-2xl border border-black/10 dark:border-white/10">
+          <table className="w-full text-sm">
+            <thead className="bg-black/5 text-left text-xs font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
+              <tr>
+                <th className="px-4 py-3">Cartão</th>
+                <th className="px-4 py-3">Valor da fatura</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {cardGroups.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={4}>
+                    Nenhum cartão ativo.
+                  </td>
+                </tr>
+              ) : (
+                cardGroups.map((g) => (
+                  <tr key={g.creditCardId} className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-4 py-3">{g.creditCardName}</td>
+                    <td className="px-4 py-3 font-medium">{formatCents(g.totalCents)}</td>
+                    <td className="px-4 py-3">
+                      {g.paid ? (
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                          Pago{g.paidAmountCents !== null ? ` (${formatCents(g.paidAmountCents)})` : ""}
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">Em aberto</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setManageCardModal({
+                              open: true,
+                              creditCardId: g.creditCardId,
+                              creditCardName: g.creditCardName,
+                              items: g.items,
+                            })
+                          }
+                          className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                        >
+                          Gerenciar contas
+                        </button>
+                        <button
+                          type="button"
+                          disabled={g.paid || bankAccounts.length === 0}
+                          onClick={() =>
+                            setPayInvoiceModal({
+                              open: true,
+                              creditCardId: g.creditCardId,
+                              creditCardName: g.creditCardName,
+                              totalCents: g.totalCents,
+                              unconfirmedForecastCount: g.unconfirmedForecastCount,
+                            })
+                          }
+                          className={
+                            g.paid || bankAccounts.length === 0
+                              ? "rounded-lg px-3 py-2 text-xs font-medium text-zinc-400"
+                              : "rounded-lg bg-black px-3 py-2 text-xs font-medium text-white hover:bg-black/90"
+                          }
+                        >
+                          Pagar fatura
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="text-sm font-semibold">Transferências (log)</div>
+        <div className="overflow-hidden rounded-2xl border border-black/10 dark:border-white/10">
+          <table className="w-full text-sm">
+            <thead className="bg-black/5 text-left text-xs font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
+              <tr>
+                <th className="px-4 py-3">Data</th>
+                <th className="px-4 py-3">Origem</th>
+                <th className="px-4 py-3">Destino</th>
+                <th className="px-4 py-3 text-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movementLog.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={4}>
+                    Sem transferências neste mês.
+                  </td>
+                </tr>
+              ) : (
+                movementLog.map((m) => (
+                  <tr key={m.id} className="border-t border-black/10 dark:border-white/10">
+                    <td className="px-4 py-3">{m.date}</td>
+                    <td className="px-4 py-3">{m.fromBankAccountName}</td>
+                    <td className="px-4 py-3">{m.toBankAccountName}</td>
+                    <td className="px-4 py-3 text-right font-medium">{formatCents(m.amountCents)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {moveToCardModal.open && (
+        <ModalShell title={`Mover para cartão — ${moveToCardModal.item.label}`} onClose={() => setMoveToCardModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              fd.set("month", month);
+              const ok =
+                moveToCardModal.item.kind === "forecast"
+                  ? await runAction(
+                      assignForecastToCard,
+                      (() => {
+                        const x = new FormData();
+                        x.set("forecastId", moveToCardModal.item.forecastId);
+                        x.set("month", month);
+                        x.set("creditCardId", String(fd.get("creditCardId") ?? ""));
+                        return x;
+                      })(),
+                    )
+                  : await runAction(
+                      assignManualChargeToCard,
+                      (() => {
+                        const x = new FormData();
+                        x.set("manualChargeId", moveToCardModal.item.manualChargeId);
+                        x.set("month", month);
+                        x.set("creditCardId", String(fd.get("creditCardId") ?? ""));
+                        return x;
+                      })(),
+                    );
+              if (ok) setMoveToCardModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <div className="rounded-xl border border-black/10 bg-black/5 p-3 text-sm dark:border-white/10 dark:bg-white/10">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-700 dark:text-zinc-200">Valor</span>
+                <span className="font-medium">{formatCents(moveToCardModal.item.amountCents)}</span>
+              </div>
+            </div>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Cartão</span>
+              <select
+                name="creditCardId"
+                required
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                defaultValue={creditCards[0]?.id ?? ""}
+              >
+                {creditCards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Confirmar
+            </button>
+          </form>
+        </ModalShell>
+      )}
+
+      {payUtilityModal.open && (
+        <ModalShell title={`Pagar — ${payUtilityModal.item.label}`} onClose={() => setPayUtilityModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              fd.set("month", month);
+              const ok =
+                payUtilityModal.item.kind === "forecast"
+                  ? await runAction(
+                      payUtilityForecast,
+                      (() => {
+                        const x = new FormData();
+                        x.set("forecastId", payUtilityModal.item.forecastId);
+                        x.set("month", month);
+                        x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
+                        x.set("amount", String(fd.get("amount") ?? ""));
+                        x.set("paidAt", String(fd.get("paidAt") ?? ""));
+                        return x;
+                      })(),
+                    )
+                  : await runAction(
+                      payManualCharge,
+                      (() => {
+                        const x = new FormData();
+                        x.set("manualChargeId", payUtilityModal.item.manualChargeId);
+                        x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
+                        x.set("amount", String(fd.get("amount") ?? ""));
+                        x.set("paidAt", String(fd.get("paidAt") ?? ""));
+                        return x;
+                      })(),
+                    );
+              if (ok) setPayUtilityModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                defaultValue={(payUtilityModal.item.amountCents / 100).toFixed(2).replace(".", ",")}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                <input
+                  type="date"
+                  name="paidAt"
+                  defaultValue={todayIsoDate()}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta bancária</span>
+                <select
+                  name="bankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={bankAccounts[0]?.id ?? ""}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Confirmar pagamento
+            </button>
+          </form>
+        </ModalShell>
+      )}
+
+      {newChargeModal.open && (
+        <ModalShell title="Novo lançamento" onClose={() => setNewChargeModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const utilityAccountId = String(fd.get("utilityAccountId") ?? "");
+              if (!utilityAccountId) return;
+
+              const paymentKind = String(fd.get("paymentKind") ?? "bank");
+              const info = bestForecastForUtility.get(utilityAccountId) ?? null;
+
+              // If there is a usable forecast this month, use the forecast flow.
+              if (info?.usable) {
+                const forecastId = info.usable.forecastId;
+
+                if (paymentKind === "bank") {
+                  const x = new FormData();
+                  x.set("forecastId", forecastId);
+                  x.set("month", month);
+                  x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
+                  x.set("amount", String(fd.get("amount") ?? ""));
+                  x.set("paidAt", String(fd.get("paidAt") ?? ""));
+                  const ok = await runAction(payUtilityForecast, x);
+                  if (ok) setNewChargeModal({ open: false });
+                  return;
+                }
+
+                const creditCardId = String(fd.get("creditCardId") ?? "");
+                const confirmedAt = String(fd.get("confirmedAt") ?? "");
+                if (!creditCardId || !confirmedAt) return;
+
+                const assign = new FormData();
+                assign.set("forecastId", forecastId);
+                assign.set("month", month);
+                assign.set("creditCardId", creditCardId);
+                const assigned = await runAction(assignForecastToCard, assign);
+                if (!assigned) return;
+
+                const conf = new FormData();
+                conf.set("forecastId", forecastId);
+                conf.set("month", month);
+                conf.set("amount", String(fd.get("amount") ?? ""));
+                conf.set("confirmedAt", confirmedAt);
+                const ok = await runAction(confirmCardForecastAmount, conf);
+                if (ok) setNewChargeModal({ open: false });
+                return;
+              }
+
+              // No forecast for this month: create a charge linked to the utility account.
+              const x = new FormData();
+              x.set("month", month);
+              x.set("utilityAccountId", utilityAccountId);
+              x.set("amount", String(fd.get("amount") ?? ""));
+
+              if (paymentKind === "bank") {
+                x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
+                x.set("paidAt", String(fd.get("paidAt") ?? ""));
+              } else {
+                x.set("creditCardId", String(fd.get("creditCardId") ?? ""));
+              }
+
+              const ok = await runAction(createManualCharge, x);
+              if (ok) setNewChargeModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta</span>
+              <Combobox
+                name="utilityAccountId"
+                options={utilityAccounts.map((u) => {
+                  const info = bestForecastForUtility.get(u.id);
+                  const disabled = Boolean(info && !info.usable && (info.paid || info.onCard));
+                  const disabledReason = disabled ? (info?.paid ? "Pago" : "No cartão") : undefined;
+                  const hasForecast = Boolean(info?.usable || info?.paid || info?.onCard);
+                  return {
+                    id: u.id,
+                    label: hasForecast ? u.name : `${u.name} (sem previsão)`,
+                    disabled,
+                    disabledReason,
+                  };
+                })}
+                placeholder={utilityAccounts.length === 0 ? "Cadastre uma conta antes" : "Digite para buscar..."}
+                disabled={utilityAccounts.length === 0}
+                onSelectedIdChange={(id) => {
+                  setNewChargeUtilityAccountId(id);
+                  const usable = bestForecastForUtility.get(id)?.usable ?? null;
+                  if (usable) setNewChargeAmount((usable.amountCents / 100).toFixed(2).replace(".", ","));
+                }}
+              />
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Forma</span>
+              <select
+                name="paymentKind"
+                value={newChargePaymentKind}
+                onChange={(e) => setNewChargePaymentKind(e.target.value === "card" ? "card" : "bank")}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+              >
+                <option value="bank" disabled={bankAccounts.length === 0}>
+                  Pagar na conta bancária
+                </option>
+                <option value="card" disabled={creditCards.length === 0}>
+                  Lançar no cartão de crédito
+                </option>
+              </select>
+            </label>
+
+            {newChargePaymentKind === "card" ? (
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Cartão</span>
+                <select
+                  name="creditCardId"
+                  required
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  defaultValue={creditCards[0]?.id ?? ""}
+                >
+                  {creditCards.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                value={newChargeAmount}
+                onChange={(e) => setNewChargeAmount(e.target.value)}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                placeholder="0,00"
+                required
+              />
+            </label>
+
+            {newChargePaymentKind === "bank" ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data de pagamento</span>
+                  <input
+                    type="date"
+                    name="paidAt"
+                    defaultValue={todayIsoDate()}
+                    className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                    required
+                  />
+                </label>
+
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta bancária</span>
+                  <select
+                    name="bankAccountId"
+                    className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                    required
+                    defaultValue={bankAccounts[0]?.id ?? ""}
+                  >
+                    {bankAccounts.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            {newChargePaymentKind === "card" && hasUsableForecastForSelected ? (
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data de confirmação</span>
+                <input
+                  type="date"
+                  name="confirmedAt"
+                  defaultValue={todayIsoDate()}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+            ) : null}
+
+            <button
+              type="submit"
+              disabled={!newChargeUtilityAccountId}
+              className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90 disabled:bg-black/40"
+            >
+              Adicionar
+            </button>
+          </form>
+        </ModalShell>
+      )}
+
+      {manageCardModal.open && (
+        <ModalShell title={`Gerenciar — ${manageCardModal.creditCardName}`} onClose={() => setManageCardModal({ open: false })}>
+          <div className="grid gap-3">
+            {manageCardModal.items.length === 0 ? (
+              <div className="text-sm text-zinc-600 dark:text-zinc-400">Nenhuma conta na fatura deste mês.</div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-black/10 dark:border-white/10">
+                <table className="w-full text-sm">
+                  <thead className="bg-black/5 text-left text-xs font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
+                    <tr>
+                      <th className="px-3 py-2">Conta</th>
+                      <th className="px-3 py-2">Venc.</th>
+                      <th className="px-3 py-2">Valor</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manageCardModal.items.map((it) => (
+                      <tr
+                        key={it.kind === "forecast" ? it.forecastId : it.manualChargeId}
+                        className="border-t border-black/10 dark:border-white/10"
+                      >
+                        <td className="px-3 py-2">{it.label}</td>
+                        <td className="px-3 py-2">{it.dueDay ? String(it.dueDay) : "-"}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-col">
+                            <span className="font-medium">{formatCents(it.amountCents)}</span>
+                            {it.kind === "forecast" && it.confirmedAmountCents !== null ? (
+                              <span className="text-xs text-emerald-700 dark:text-emerald-300">Confirmado</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-2">
+                            {it.kind === "forecast" ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmCardItemModal({
+                                    open: true,
+                                    forecastId: it.forecastId,
+                                    label: it.label,
+                                    amountCents: it.amountCents,
+                                    originalAmountCents: it.originalAmountCents,
+                                    confirmedAmountCents: it.confirmedAmountCents,
+                                    confirmedAt: it.confirmedAt,
+                                  })
+                                }
+                                className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                              >
+                                {it.confirmedAmountCents !== null ? "Editar confirmação" : "Confirmar valor"}
+                              </button>
+                            ) : null}
+
+                            {it.kind === "forecast" && it.confirmedAmountCents !== null ? (
+                              <form
+                                action={async () => {
+                                  const ok = await runAction(
+                                    unconfirmCardForecastAmount,
+                                    (() => {
+                                      const x = new FormData();
+                                      x.set("forecastId", it.forecastId);
+                                      x.set("month", month);
+                                      return x;
+                                    })(),
+                                  );
+                                  if (ok) {
+                                    setManageCardModal((cur) => {
+                                      if (!cur.open) return cur;
+                                      return {
+                                        ...cur,
+                                        items: cur.items.map((x) =>
+                                          x.kind === "forecast" && x.forecastId === it.forecastId
+                                            ? {
+                                                ...x,
+                                                amountCents: x.originalAmountCents,
+                                                confirmedAmountCents: null,
+                                                confirmedAt: null,
+                                              }
+                                            : x,
+                                        ),
+                                      };
+                                    });
+                                  }
+                                }}
+                              >
+                                <button
+                                  type="submit"
+                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                >
+                                  Desfazer confirmação
+                                </button>
+                              </form>
+                            ) : null}
+
+                            {it.kind === "forecast" ? (
+                              <form
+                                action={async () => {
+                                  const ok = await runAction(
+                                    skipForecastForMonth,
+                                    (() => {
+                                      const x = new FormData();
+                                      x.set("forecastId", it.forecastId);
+                                      x.set("month", month);
+                                      return x;
+                                    })(),
+                                  );
+                                  if (ok) setManageCardModal({ open: false });
+                                }}
+                              >
+                                <button
+                                  type="submit"
+                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                >
+                                  Remover do mês
+                                </button>
+                              </form>
+                            ) : null}
+
+                            <form
+                              action={async () => {
+                                const ok =
+                                  it.kind === "forecast"
+                                    ? await runAction(
+                                        unassignForecastFromCard,
+                                        (() => {
+                                          const x = new FormData();
+                                          x.set("forecastId", it.forecastId);
+                                          x.set("month", month);
+                                          return x;
+                                        })(),
+                                      )
+                                    : await runAction(
+                                        unassignManualChargeFromCard,
+                                        (() => {
+                                          const x = new FormData();
+                                          x.set("manualChargeId", it.manualChargeId);
+                                          x.set("month", month);
+                                          return x;
+                                        })(),
+                                      );
+                                if (ok) {
+                                  setManageCardModal({
+                                    ...manageCardModal,
+                                    items: manageCardModal.items.filter((x) =>
+                                      it.kind === "forecast"
+                                        ? x.kind !== "forecast" || x.forecastId !== it.forecastId
+                                        : x.kind !== "manual" || x.manualChargeId !== it.manualChargeId,
+                                    ),
+                                  });
+                                }
+                              }}
+                            >
+                              <button
+                                type="submit"
+                                className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                              >
+                                Voltar pra lista
+                              </button>
+                            </form>
+
+                            {it.kind === "manual" ? (
+                              <form
+                                action={async () => {
+                                  await runAction(
+                                    deleteManualCharge,
+                                    (() => {
+                                      const x = new FormData();
+                                      x.set("id", it.manualChargeId);
+                                      return x;
+                                    })(),
+                                  );
+                                  setManageCardModal({
+                                    ...manageCardModal,
+                                    items: manageCardModal.items.filter((x) =>
+                                      x.kind !== "manual" || x.manualChargeId !== it.manualChargeId,
+                                    ),
+                                  });
+                                }}
+                              >
+                                <button
+                                  type="submit"
+                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                >
+                                  Remover do mês
+                                </button>
+                              </form>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </ModalShell>
+      )}
+
+      {confirmCardItemModal.open && (
+        <ModalShell title={`Confirmar valor — ${confirmCardItemModal.label}`} onClose={() => setConfirmCardItemModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const amountRaw = String(fd.get("amount") ?? "");
+              const confirmedAt = String(fd.get("confirmedAt") ?? "");
+              const amountCents = parseMoneyToCents(amountRaw);
+              if (amountCents === null) return;
+
+              const x = new FormData();
+              x.set("forecastId", confirmCardItemModal.forecastId);
+              x.set("month", month);
+              x.set("amount", amountRaw);
+              x.set("confirmedAt", confirmedAt);
+              const ok = await runAction(confirmCardForecastAmount, x);
+              if (ok) {
+                setManageCardModal((cur) => {
+                  if (!cur.open) return cur;
+                  return {
+                    ...cur,
+                    items: cur.items.map((it) =>
+                      it.kind === "forecast" && it.forecastId === confirmCardItemModal.forecastId
+                        ? {
+                            ...it,
+                            amountCents,
+                            confirmedAmountCents: amountCents,
+                            confirmedAt,
+                          }
+                        : it,
+                    ),
+                  };
+                });
+                setConfirmCardItemModal({ open: false });
+              }
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                defaultValue={
+                  (
+                    ((confirmCardItemModal.confirmedAmountCents ?? confirmCardItemModal.amountCents) as number) / 100
+                  )
+                    .toFixed(2)
+                    .replace(".", ",")
+                }
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+              <input
+                type="date"
+                name="confirmedAt"
+                defaultValue={confirmCardItemModal.confirmedAt ?? todayIsoDate()}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Confirmar
+            </button>
+
+            {confirmCardItemModal.confirmedAmountCents !== null ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await runAction(
+                    unconfirmCardForecastAmount,
+                    (() => {
+                      const x = new FormData();
+                      x.set("forecastId", confirmCardItemModal.forecastId);
+                      x.set("month", month);
+                      return x;
+                    })(),
+                  );
+
+                  if (!ok) return;
+
+                  setManageCardModal((cur) => {
+                    if (!cur.open) return cur;
+                    return {
+                      ...cur,
+                      items: cur.items.map((it) =>
+                        it.kind === "forecast" && it.forecastId === confirmCardItemModal.forecastId
+                          ? {
+                              ...it,
+                              amountCents: it.originalAmountCents,
+                              confirmedAmountCents: null,
+                              confirmedAt: null,
+                            }
+                          : it,
+                      ),
+                    };
+                  });
+
+                  setConfirmCardItemModal({ open: false });
+                }}
+                className="h-10 rounded-lg px-4 text-sm font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+              >
+                Desfazer confirmação
+              </button>
+            ) : null}
+          </form>
+        </ModalShell>
+      )}
+
+      {payInvoiceModal.open && (
+        <ModalShell title={`Pagar fatura — ${payInvoiceModal.creditCardName}`} onClose={() => setPayInvoiceModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              fd.set("creditCardId", payInvoiceModal.creditCardId);
+              fd.set("month", month);
+              const ok = await runAction(payCreditCardInvoice, fd);
+              if (ok) setPayInvoiceModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            {payInvoiceModal.unconfirmedForecastCount > 0 ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+                Existem {payInvoiceModal.unconfirmedForecastCount} conta(s) na fatura sem confirmação de valor. Confirme em “Gerenciar contas” antes de pagar.
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border border-black/10 bg-black/5 p-3 text-sm dark:border-white/10 dark:bg-white/10">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-700 dark:text-zinc-200">Total calculado</span>
+                <span className="font-medium">{formatCents(payInvoiceModal.totalCents)}</span>
+              </div>
+            </div>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                defaultValue={payInvoiceModal.totalCents > 0 ? (payInvoiceModal.totalCents / 100).toFixed(2).replace(".", ",") : ""}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                <input
+                  type="date"
+                  name="paidAt"
+                  defaultValue={todayIsoDate()}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta bancária</span>
+                <select
+                  name="bankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={bankAccounts[0]?.id ?? ""}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={payInvoiceModal.unconfirmedForecastCount > 0}
+              className={
+                payInvoiceModal.unconfirmedForecastCount > 0
+                  ? "h-10 rounded-lg bg-black/40 px-4 text-sm font-medium text-white"
+                  : "h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90"
+              }
+            >
+              Confirmar pagamento
+            </button>
+          </form>
+        </ModalShell>
+      )}
+
+      {receiveIncomeModal.open ? (
+        <ModalShell title={`Receber — ${receiveIncomeModal.item.label}`} onClose={() => setReceiveIncomeModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const x = new FormData();
+              x.set("incomeForecastId", receiveIncomeModal.item.incomeForecastId);
+              x.set("month", month);
+              x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
+              x.set("amount", String(fd.get("amount") ?? ""));
+              x.set("receivedAt", String(fd.get("receivedAt") ?? ""));
+              const ok = await runAction(receiveIncomeForecast, x);
+              if (ok) setReceiveIncomeModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                data-autofocus
+                defaultValue={(receiveIncomeModal.item.amountCents / 100).toFixed(2).replace(".", ",")}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                <input
+                  type="date"
+                  name="receivedAt"
+                  defaultValue={todayIsoDate()}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta bancária</span>
+                <select
+                  name="bankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={receiveIncomeModal.item.bankAccountId ?? bankAccounts[0]?.id ?? ""}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Confirmar recebimento
+            </button>
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {transferModal.open && (
+        <ModalShell title="Transferir entre contas" onClose={() => setTransferModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const ok = await runAction(createBankTransfer, fd);
+              if (ok) setTransferModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Origem</span>
+                <select
+                  name="fromBankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={bankAccounts[0]?.id ?? ""}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Destino</span>
+                <select
+                  name="toBankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={bankAccounts[0]?.id ?? ""}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+              <input
+                type="date"
+                name="transferAt"
+                defaultValue={todayIsoDate()}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Confirmar transferência
+            </button>
+          </form>
+        </ModalShell>
+      )}
+    </section>
+  );
+}
