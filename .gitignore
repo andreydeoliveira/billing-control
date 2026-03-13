@@ -36,6 +36,12 @@ yarn-error.log*
 # local sqlite
 dev.db*
 
+# prisma sqlite (this repo keeps DB under prisma/)
+/prisma/*.db*
+/prisma/*.db-journal
+/prisma/*.db-wal
+/prisma/*.db-shm
+
 # vercel
 .vercel
 
@@ -44,3 +50,8 @@ dev.db*
 next-env.d.ts
 
 /src/generated/prisma
+
+# prisma engine artifacts (Windows can leave tmp files behind)
+/src/generated/prisma/query_engine-*
+/src/generated/prisma/libquery_engine-*
+/src/generated/prisma/**/*.tmp*
