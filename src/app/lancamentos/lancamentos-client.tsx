@@ -28,7 +28,13 @@ import {
 type BankAccount = {
   id: string;
   name: string;
+  bank: string;
 };
+
+function bankAccountLabel(a: BankAccount): string {
+  const bank = String(a.bank ?? "").trim();
+  return bank ? `${a.name} (${bank})` : a.name;
+}
 
 type CreditCard = {
   id: string;
@@ -882,7 +888,7 @@ export function LancamentosClient({
                 >
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.name}
+                      {bankAccountLabel(b)}
                     </option>
                   ))}
                 </select>
@@ -1058,7 +1064,7 @@ export function LancamentosClient({
                   >
                     {bankAccounts.map((b) => (
                       <option key={b.id} value={b.id}>
-                        {b.name}
+                        {bankAccountLabel(b)}
                       </option>
                     ))}
                   </select>
@@ -1460,7 +1466,7 @@ export function LancamentosClient({
                 >
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.name}
+                      {bankAccountLabel(b)}
                     </option>
                   ))}
                 </select>
@@ -1534,7 +1540,7 @@ export function LancamentosClient({
                   </option>
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.name}
+                      {bankAccountLabel(b)}
                     </option>
                   ))}
                 </select>
@@ -1568,7 +1574,7 @@ export function LancamentosClient({
                 >
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.name}
+                      {bankAccountLabel(b)}
                     </option>
                   ))}
                 </select>
@@ -1584,7 +1590,7 @@ export function LancamentosClient({
                 >
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.name}
+                      {bankAccountLabel(b)}
                     </option>
                   ))}
                 </select>

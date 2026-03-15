@@ -1581,7 +1581,7 @@ function IncomeForecastForm({
           <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta bancária</span>
           <Combobox
             name="bankAccountId"
-            options={bankAccounts.map((b) => ({ id: b.id, label: b.name }))}
+            options={bankAccounts.map((b) => ({ id: b.id, label: b.bank ? `${b.name} (${b.bank})` : b.name }))}
             defaultValue={selectedBankAccountId}
             disabled={!hasBankAccounts}
             placeholder={hasBankAccounts ? "Digite para buscar..." : "Cadastre uma conta bancária antes"}

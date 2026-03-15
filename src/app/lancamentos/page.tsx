@@ -140,7 +140,7 @@ export default async function LancamentosPage(props: {
       prisma.bankAccount.findMany({
         where: { status: "ACTIVE" },
         orderBy: { name: "asc" },
-        select: { id: true, name: true },
+        select: { id: true, name: true, bank: true },
       }),
       prisma.creditCard.findMany({
         where: { status: "ACTIVE" },
