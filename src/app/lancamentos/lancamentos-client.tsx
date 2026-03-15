@@ -1527,8 +1527,11 @@ export function LancamentosClient({
                   name="bankAccountId"
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
-                  defaultValue={receiveIncomeModal.item.bankAccountId ?? bankAccounts[0]?.id ?? ""}
+                  defaultValue={receiveIncomeModal.item.bankAccountId ?? ""}
                 >
+                  <option value="" disabled>
+                    Selecione...
+                  </option>
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.name}

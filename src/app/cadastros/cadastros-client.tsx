@@ -520,7 +520,7 @@ export function CadastrosClient({
         initial: {
           kind: "incomeForecast",
           incomeSourceId: "",
-          bankAccountId: activeBankAccounts[0]?.id ?? "",
+          bankAccountId: "",
           amountCents: 0,
           dueDay: 5,
           installmentsTotal: 12,
@@ -565,7 +565,7 @@ export function CadastrosClient({
       initial: {
         kind: "incomeForecast",
         incomeSourceId,
-        bankAccountId: activeBankAccounts[0]?.id ?? "",
+        bankAccountId: "",
         amountCents: 0,
         dueDay: 5,
         installmentsTotal: 12,
@@ -1582,7 +1582,7 @@ function IncomeForecastForm({
           <Combobox
             name="bankAccountId"
             options={bankAccounts.map((b) => ({ id: b.id, label: b.name }))}
-            defaultValue={selectedBankAccountId || bankAccounts[0]?.id}
+            defaultValue={selectedBankAccountId}
             disabled={!hasBankAccounts}
             placeholder={hasBankAccounts ? "Digite para buscar..." : "Cadastre uma conta bancária antes"}
             onSelectedIdChange={setSelectedBankAccountId}
