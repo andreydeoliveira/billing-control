@@ -30,10 +30,21 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <div className="min-h-screen bg-background text-foreground">
-          <header className="sticky top-0 z-10 border-b border-black/10 bg-background/80 backdrop-blur dark:border-white/10">
+          <header className="sticky top-0 z-10 border-b border-border bg-background/70 backdrop-blur">
             <div className="mx-auto flex w-full max-w-screen-2xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-              <div className="text-sm font-semibold tracking-wide">
-                Billing Control
+              <div className="flex items-center gap-2">
+                <div className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+                    <path
+                      fill="currentColor"
+                      d="M12 2a10 10 0 1 0 10 10A10.01 10.01 0 0 0 12 2Zm1 15.5h-2v-1h2a2 2 0 0 0 0-4h-2a4 4 0 0 1 0-8h2v1h-2a2 2 0 0 0 0 4h2a4 4 0 0 1 0 8Z"
+                    />
+                  </svg>
+                </div>
+                <div className="leading-tight">
+                  <div className="text-sm font-semibold tracking-wide">Billing Control</div>
+                  <div className="text-xs text-zinc-600 dark:text-zinc-300">Controle financeiro pessoal</div>
+                </div>
               </div>
 
               <TopNav />
