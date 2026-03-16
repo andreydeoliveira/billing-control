@@ -23,6 +23,9 @@ import {
   unassignForecastFromCard,
   unassignManualChargeFromCard,
   unconfirmCardForecastAmount,
+  updateManualCharge,
+  updateBankTransfer,
+  deleteBankTransfer,
 } from "@/app/actions/lancamentos";
 
 type BankAccount = {
@@ -67,6 +70,7 @@ type IncomeItem = {
   receivedAmountCents: number | null;
   receivedAt: string | null; // YYYY-MM-DD
   receivedBankAccountName: string | null;
+  receivedBankAccountBank: string | null;
 };
 
 type DirectItem =
@@ -119,11 +123,24 @@ type CardGroup = {
 
 type MovementLogItem = {
   id: string;
+  transferId: string;
   date: string; // YYYY-MM-DD
+  fromBankAccountId: string;
   fromBankAccountName: string;
+  toBankAccountId: string;
   toBankAccountName: string;
   amountCents: number;
 };
+
+function dayFromIsoDate(iso: string | null): number | null {
+  const s = String(iso ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const day = Number(m[3]);
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+  return day;
+}
 
 type MonthSummary = {
   plannedIncomeCents: number;
@@ -283,6 +300,35 @@ type PayInvoiceModalState =
       unconfirmedForecastCount: number;
     };
 
+type EditManualChargeModalState =
+  | { open: false }
+  | {
+      open: true;
+      manualChargeId: string;
+      description: string;
+      amountCents: number;
+      dueDay: number | null;
+    };
+
+type EditTransferModalState =
+  | { open: false }
+  | {
+      open: true;
+      transferId: string;
+      transferAt: string; // YYYY-MM-DD
+      fromBankAccountId: string;
+      toBankAccountId: string;
+      amountCents: number;
+    };
+
+type AddCardChargeModalState =
+  | { open: false }
+  | {
+      open: true;
+      creditCardId: string;
+      creditCardName: string;
+    };
+
 type ReceiveIncomeModalState =
   | { open: false }
   | {
@@ -333,6 +379,9 @@ export function LancamentosClient({
   const [payInvoiceModal, setPayInvoiceModal] = React.useState<PayInvoiceModalState>({ open: false });
   const [receiveIncomeModal, setReceiveIncomeModal] = React.useState<ReceiveIncomeModalState>({ open: false });
   const [transferModal, setTransferModal] = React.useState<TransferModalState>({ open: false });
+  const [editManualChargeModal, setEditManualChargeModal] = React.useState<EditManualChargeModalState>({ open: false });
+  const [editTransferModal, setEditTransferModal] = React.useState<EditTransferModalState>({ open: false });
+  const [addCardChargeModal, setAddCardChargeModal] = React.useState<AddCardChargeModalState>({ open: false });
 
   const bestForecastForUtility = React.useMemo(() => {
     const map = new Map<string, { usable: ForecastChoice | null; paid: boolean; onCard: boolean }>();
@@ -434,19 +483,32 @@ export function LancamentosClient({
                 incomeItems.map((it) => (
                   <tr key={it.incomeForecastId} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-4 py-3">{it.label}</td>
-                    <td className="px-4 py-3">{it.dueDay ? String(it.dueDay) : "-"}</td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const receivedDay = it.received ? dayFromIsoDate(it.receivedAt) : null;
+                        const day = receivedDay ?? it.dueDay ?? null;
+                        return day ? String(day) : "-";
+                      })()}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span className="font-medium">{formatCents(it.amountCents)}</span>
-                        {it.received && it.receivedAmountCents !== null && it.receivedAmountCents !== it.amountCents ? (
-                          <span className="text-xs text-zinc-600 dark:text-zinc-400">Recebido: {formatCents(it.receivedAmountCents)}</span>
-                        ) : null}
+                        {it.received && it.receivedAmountCents !== null ? (
+                          <>
+                            <span className="font-medium">{formatCents(it.receivedAmountCents)}</span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-400">Previsto: {formatCents(it.amountCents)}</span>
+                          </>
+                        ) : (
+                          <span className="font-medium">{formatCents(it.amountCents)}</span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       {it.received ? (
                         <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                          Recebido{it.receivedBankAccountName ? ` (${it.receivedBankAccountName})` : ""}
+                          Recebido
+                          {it.receivedBankAccountName
+                            ? ` (${it.receivedBankAccountName}${it.receivedBankAccountBank ? `: ${it.receivedBankAccountBank}` : ""})`
+                            : ""}
                         </span>
                       ) : (
                         <span className="rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">Em aberto</span>
@@ -571,6 +633,24 @@ export function LancamentosClient({
                           </form>
                         ) : (
                           <>
+                            {it.kind === "manual" ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditManualChargeModal({
+                                    open: true,
+                                    manualChargeId: it.manualChargeId,
+                                    description: it.label,
+                                    amountCents: it.amountCents,
+                                    dueDay: it.dueDay,
+                                  })
+                                }
+                                className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                              >
+                                Editar
+                              </button>
+                            ) : null}
+
                             <button
                               type="button"
                               disabled={bankAccounts.length === 0}
@@ -736,12 +816,13 @@ export function LancamentosClient({
                 <th className="px-4 py-3">Origem</th>
                 <th className="px-4 py-3">Destino</th>
                 <th className="px-4 py-3 text-right">Valor</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
               {movementLog.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={4}>
+                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={5}>
                     Sem transferências neste mês.
                   </td>
                 </tr>
@@ -752,6 +833,40 @@ export function LancamentosClient({
                     <td className="px-4 py-3">{m.fromBankAccountName}</td>
                     <td className="px-4 py-3">{m.toBankAccountName}</td>
                     <td className="px-4 py-3 text-right font-medium">{formatCents(m.amountCents)}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditTransferModal({
+                              open: true,
+                              transferId: m.transferId,
+                              transferAt: m.date,
+                              fromBankAccountId: m.fromBankAccountId,
+                              toBankAccountId: m.toBankAccountId,
+                              amountCents: m.amountCents,
+                            })
+                          }
+                          className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                        >
+                          Editar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const okConfirm = window.confirm("Apagar esta transferência? Isso ajusta os saldos das contas.");
+                            if (!okConfirm) return;
+                            const fd = new FormData();
+                            fd.set("transferId", m.transferId);
+                            await runAction(deleteBankTransfer, fd);
+                          }}
+                          className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                        >
+                          Apagar
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -1099,6 +1214,21 @@ export function LancamentosClient({
       {manageCardModal.open && (
         <ModalShell title={`Gerenciar — ${manageCardModal.creditCardName}`} onClose={() => setManageCardModal({ open: false })}>
           <div className="grid gap-3">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() =>
+                  setAddCardChargeModal({
+                    open: true,
+                    creditCardId: manageCardModal.creditCardId,
+                    creditCardName: manageCardModal.creditCardName,
+                  })
+                }
+                className="rounded-lg bg-black px-3 py-2 text-xs font-medium text-white hover:bg-black/90"
+              >
+                Adicionar lançamento
+              </button>
+            </div>
             {manageCardModal.items.length === 0 ? (
               <div className="text-sm text-zinc-600 dark:text-zinc-400">Nenhuma conta na fatura deste mês.</div>
             ) : (
@@ -1147,6 +1277,24 @@ export function LancamentosClient({
                                 className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
                               >
                                 {it.confirmedAmountCents !== null ? "Editar confirmação" : "Confirmar valor"}
+                              </button>
+                            ) : null}
+
+                            {it.kind === "manual" ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditManualChargeModal({
+                                    open: true,
+                                    manualChargeId: it.manualChargeId,
+                                    description: it.label,
+                                    amountCents: it.amountCents,
+                                    dueDay: it.dueDay,
+                                  })
+                                }
+                                className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                              >
+                                Editar
                               </button>
                             ) : null}
 
@@ -1293,6 +1441,211 @@ export function LancamentosClient({
               </div>
             )}
           </div>
+        </ModalShell>
+      )}
+
+      {addCardChargeModal.open && (
+        <ModalShell
+          title={`Novo lançamento — ${addCardChargeModal.creditCardName}`}
+          onClose={() => setAddCardChargeModal({ open: false })}
+        >
+          <form
+            action={async (fd) => {
+              const x = new FormData();
+              x.set("month", month);
+              x.set("creditCardId", addCardChargeModal.creditCardId);
+              x.set("description", String(fd.get("description") ?? ""));
+              x.set("amount", String(fd.get("amount") ?? ""));
+
+              const dueDayRaw = String(fd.get("dueDay") ?? "").trim();
+              if (dueDayRaw.length) x.set("dueDay", dueDayRaw);
+
+              const ok = await runAction(createManualCharge, x);
+              if (ok) {
+                setAddCardChargeModal({ open: false });
+                setManageCardModal({ open: false });
+              }
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Descrição</span>
+              <input
+                name="description"
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+                data-autofocus
+              />
+            </label>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Dia (opcional)</span>
+                <input
+                  name="dueDay"
+                  inputMode="numeric"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  placeholder="1-31"
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+                <input
+                  name="amount"
+                  inputMode="decimal"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  placeholder="0,00"
+                  required
+                />
+              </label>
+            </div>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Adicionar
+            </button>
+          </form>
+        </ModalShell>
+      )}
+
+      {editManualChargeModal.open && (
+        <ModalShell title="Editar lançamento" onClose={() => setEditManualChargeModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const x = new FormData();
+              x.set("manualChargeId", editManualChargeModal.manualChargeId);
+              x.set("description", String(fd.get("description") ?? ""));
+              x.set("amount", String(fd.get("amount") ?? ""));
+
+              const dueDayRaw = String(fd.get("dueDay") ?? "").trim();
+              if (dueDayRaw.length) x.set("dueDay", dueDayRaw);
+
+              const ok = await runAction(updateManualCharge, x);
+              if (ok) setEditManualChargeModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Descrição</span>
+              <input
+                name="description"
+                defaultValue={editManualChargeModal.description}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+                data-autofocus
+              />
+            </label>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Dia (opcional)</span>
+                <input
+                  name="dueDay"
+                  inputMode="numeric"
+                  defaultValue={editManualChargeModal.dueDay ? String(editManualChargeModal.dueDay) : ""}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  placeholder="1-31"
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+                <input
+                  name="amount"
+                  inputMode="decimal"
+                  defaultValue={(editManualChargeModal.amountCents / 100).toFixed(2).replace(".", ",")}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+            </div>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Salvar
+            </button>
+          </form>
+        </ModalShell>
+      )}
+
+      {editTransferModal.open && (
+        <ModalShell title="Editar transferência" onClose={() => setEditTransferModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const x = new FormData();
+              x.set("transferId", editTransferModal.transferId);
+              x.set("fromBankAccountId", String(fd.get("fromBankAccountId") ?? ""));
+              x.set("toBankAccountId", String(fd.get("toBankAccountId") ?? ""));
+              x.set("amount", String(fd.get("amount") ?? ""));
+              x.set("transferAt", String(fd.get("transferAt") ?? ""));
+
+              const ok = await runAction(updateBankTransfer, x);
+              if (ok) setEditTransferModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                <input
+                  type="date"
+                  name="transferAt"
+                  defaultValue={editTransferModal.transferAt}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  data-autofocus
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+                <input
+                  name="amount"
+                  inputMode="decimal"
+                  defaultValue={(editTransferModal.amountCents / 100).toFixed(2).replace(".", ",")}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Origem</span>
+                <select
+                  name="fromBankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={editTransferModal.fromBankAccountId}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {bankAccountLabel(b)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Destino</span>
+                <select
+                  name="toBankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={editTransferModal.toBankAccountId}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {bankAccountLabel(b)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Salvar
+            </button>
+          </form>
         </ModalShell>
       )}
 

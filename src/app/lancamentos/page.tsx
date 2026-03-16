@@ -168,7 +168,7 @@ export default async function LancamentosPage(props: {
       prisma.incomeReceipt.findMany({
         where: { month: monthStart },
         include: {
-          bankAccount: { select: { id: true, name: true } },
+          bankAccount: { select: { id: true, name: true, bank: true } },
           incomeSource: { select: { id: true, name: true } },
         },
       }),
@@ -254,6 +254,7 @@ export default async function LancamentosPage(props: {
         receivedAmountCents: r?.amountCents ?? null,
         receivedAt: r?.receivedAt ? r.receivedAt.toISOString().slice(0, 10) : null,
         receivedBankAccountName: r?.bankAccount?.name ?? null,
+        receivedBankAccountBank: r?.bankAccount?.bank ?? null,
       };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -292,7 +293,7 @@ export default async function LancamentosPage(props: {
       manualChargeId: c.id,
       label: c.description,
       amountCents: c.amountCents,
-      dueDay: c.dueDay ?? null,
+      dueDay: c.dueDay ?? (c.paidAt ? c.paidAt.getUTCDate() : null),
       paid: Boolean(c.paidAt),
       paidAmountCents: c.paidAmountCents ?? null,
     }));
@@ -309,8 +310,11 @@ export default async function LancamentosPage(props: {
   const movementLog = (() => {
     const rows: Array<{
       id: string;
+      transferId: string;
       date: string; // YYYY-MM-DD
+      fromBankAccountId: string;
       fromBankAccountName: string;
+      toBankAccountId: string;
       toBankAccountName: string;
       amountCents: number;
       sortKey: number;
@@ -321,8 +325,11 @@ export default async function LancamentosPage(props: {
       const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
       rows.push({
         id: `transfer:${t.id}`,
+        transferId: t.id,
         date,
+        fromBankAccountId: t.fromBankAccount.id,
         fromBankAccountName: t.fromBankAccount.name,
+        toBankAccountId: t.toBankAccount.id,
         toBankAccountName: t.toBankAccount.name,
         amountCents: t.amountCents,
         sortKey: d.getTime(),
@@ -334,8 +341,11 @@ export default async function LancamentosPage(props: {
 
   const movementLogPublic = movementLog.map((m) => ({
     id: m.id,
+    transferId: m.transferId,
     date: m.date,
+    fromBankAccountId: m.fromBankAccountId,
     fromBankAccountName: m.fromBankAccountName,
+    toBankAccountId: m.toBankAccountId,
     toBankAccountName: m.toBankAccountName,
     amountCents: m.amountCents,
   }));

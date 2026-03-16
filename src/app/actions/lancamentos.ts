@@ -691,6 +691,115 @@ export async function createBankTransfer(formData: FormData): Promise<boolean> {
   return true;
 }
 
+export async function updateBankTransfer(formData: FormData): Promise<boolean> {
+  const parsed = z
+    .object({
+      transferId: IdSchema,
+      fromBankAccountId: IdSchema,
+      toBankAccountId: IdSchema,
+      amount: z.any(),
+      transferAt: z.string().min(1),
+    })
+    .safeParse({
+      transferId: formData.get("transferId"),
+      fromBankAccountId: formData.get("fromBankAccountId"),
+      toBankAccountId: formData.get("toBankAccountId"),
+      amount: formData.get("amount"),
+      transferAt: formData.get("transferAt"),
+    });
+
+  if (!parsed.success) return false;
+  if (parsed.data.fromBankAccountId === parsed.data.toBankAccountId) return false;
+
+  const transferAt = parseOptionalDate(parsed.data.transferAt);
+  const amountCents = parseMoneyToCents(parsed.data.amount);
+  if (!transferAt || amountCents === null) return false;
+  if (amountCents <= 0) return false;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.bankTransfer.findUnique({
+        where: { id: parsed.data.transferId },
+        select: {
+          id: true,
+          fromBankAccountId: true,
+          toBankAccountId: true,
+          amountCents: true,
+        },
+      });
+      if (!existing) throw new Error("not_found");
+
+      // Revert old balances
+      await tx.bankAccount.update({
+        where: { id: existing.fromBankAccountId },
+        data: { balanceCents: { increment: existing.amountCents } },
+      });
+      await tx.bankAccount.update({
+        where: { id: existing.toBankAccountId },
+        data: { balanceCents: { decrement: existing.amountCents } },
+      });
+
+      // Update transfer record
+      await tx.bankTransfer.update({
+        where: { id: existing.id },
+        data: {
+          fromBankAccountId: parsed.data.fromBankAccountId,
+          toBankAccountId: parsed.data.toBankAccountId,
+          amountCents,
+          transferAt,
+        },
+      });
+
+      // Apply new balances
+      await tx.bankAccount.update({
+        where: { id: parsed.data.fromBankAccountId },
+        data: { balanceCents: { decrement: amountCents } },
+      });
+      await tx.bankAccount.update({
+        where: { id: parsed.data.toBankAccountId },
+        data: { balanceCents: { increment: amountCents } },
+      });
+    });
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/lancamentos");
+  return true;
+}
+
+export async function deleteBankTransfer(formData: FormData): Promise<boolean> {
+  const parsed = z.object({ transferId: IdSchema }).safeParse({ transferId: formData.get("transferId") });
+  if (!parsed.success) return false;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.bankTransfer.findUnique({
+        where: { id: parsed.data.transferId },
+        select: { id: true, fromBankAccountId: true, toBankAccountId: true, amountCents: true },
+      });
+      if (!existing) throw new Error("not_found");
+
+      // Revert balances
+      await tx.bankAccount.update({
+        where: { id: existing.fromBankAccountId },
+        data: { balanceCents: { increment: existing.amountCents } },
+      });
+      await tx.bankAccount.update({
+        where: { id: existing.toBankAccountId },
+        data: { balanceCents: { decrement: existing.amountCents } },
+      });
+
+      await tx.bankTransfer.delete({ where: { id: existing.id } });
+    });
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/lancamentos");
+  return true;
+}
+
 export async function createManualCharge(formData: FormData): Promise<boolean> {
   const parsed = z
     .object({
@@ -783,6 +892,78 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
         creditCardId: creditCardId && creditCardId.length ? creditCardId : null,
       },
     });
+  }
+
+  revalidatePath("/lancamentos");
+  return true;
+}
+
+export async function updateManualCharge(formData: FormData): Promise<boolean> {
+  const parsed = z
+    .object({
+      manualChargeId: IdSchema,
+      description: z.string().trim().min(1).max(120),
+      amount: z.any(),
+      dueDay: z.string().optional(),
+    })
+    .safeParse({
+      manualChargeId: formData.get("manualChargeId"),
+      description: formData.get("description"),
+      amount: formData.get("amount"),
+      dueDay: formData.get("dueDay") ? String(formData.get("dueDay")) : undefined,
+    });
+
+  if (!parsed.success) return false;
+  const amountCents = parseMoneyToCents(parsed.data.amount);
+  if (amountCents === null) return false;
+  if (amountCents <= 0) return false;
+
+  const dueDayRaw = String(parsed.data.dueDay ?? "").trim();
+  const dueDay = dueDayRaw.length ? Number(dueDayRaw) : undefined;
+  if (dueDay !== undefined && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31)) return false;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.manualCharge.findUnique({
+        where: { id: parsed.data.manualChargeId },
+        select: {
+          id: true,
+          amountCents: true,
+          paidAmountCents: true,
+          paidAt: true,
+          bankAccountId: true,
+        },
+      });
+
+      if (!existing) throw new Error("not_found");
+
+      const wasPaidDirect = Boolean(existing.paidAt && existing.bankAccountId);
+      const oldPaidCents = wasPaidDirect ? (existing.paidAmountCents ?? existing.amountCents) : null;
+
+      await tx.manualCharge.update({
+        where: { id: existing.id },
+        data: {
+          description: parsed.data.description,
+          amountCents,
+          dueDay,
+          paidAmountCents: wasPaidDirect ? amountCents : undefined,
+        },
+      });
+
+      if (wasPaidDirect && existing.bankAccountId && oldPaidCents !== null) {
+        const delta = amountCents - oldPaidCents;
+        if (delta !== 0) {
+          await tx.bankAccount.update({
+            where: { id: existing.bankAccountId },
+            data: {
+              balanceCents: delta > 0 ? { decrement: delta } : { increment: -delta },
+            },
+          });
+        }
+      }
+    });
+  } catch {
+    return false;
   }
 
   revalidatePath("/lancamentos");
