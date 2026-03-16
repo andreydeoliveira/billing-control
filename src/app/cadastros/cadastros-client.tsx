@@ -1376,6 +1376,7 @@ function ForecastForm({
             name="utilityAccountId"
             options={utilityAccounts.map((u) => ({ id: u.id, label: u.name }))}
             defaultValue={initial.utilityAccountId}
+            autoFocus
             disabled={!hasUtilityAccounts}
             placeholder={hasUtilityAccounts ? "Digite para buscar..." : "Cadastre uma conta antes"}
             onSelectedIdChange={setSelectedUtilityAccountId}
@@ -1388,7 +1389,6 @@ function ForecastForm({
             name="amount"
             placeholder="0,00"
             required
-            data-autofocus
             defaultValue={formatMoneyBRLFromCents(initial.amountCents)}
             className="h-11 w-full rounded-lg border border-black/10 bg-transparent px-3 text-sm outline-none focus:ring-2 focus:ring-black/15 dark:border-white/10 dark:focus:ring-white/15"
           />
@@ -1571,6 +1571,7 @@ function IncomeForecastForm({
             name="incomeSourceId"
             options={incomeSources.map((s) => ({ id: s.id, label: s.name }))}
             defaultValue={initial.incomeSourceId}
+            autoFocus
             disabled={!hasIncomeSources}
             placeholder={hasIncomeSources ? "Digite para buscar..." : "Cadastre uma entrada antes"}
             onSelectedIdChange={setSelectedIncomeSourceId}
@@ -1597,7 +1598,6 @@ function IncomeForecastForm({
             name="amount"
             placeholder="0,00"
             required
-            data-autofocus
             defaultValue={formatMoneyBRLFromCents(initial.amountCents)}
             className="h-11 w-full rounded-lg border border-black/10 bg-transparent px-3 text-sm outline-none focus:ring-2 focus:ring-black/15 dark:border-white/10 dark:focus:ring-white/15"
           />

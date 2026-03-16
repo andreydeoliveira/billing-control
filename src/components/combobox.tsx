@@ -15,6 +15,7 @@ export function Combobox({
   defaultValue,
   placeholder,
   disabled,
+  autoFocus,
   onSelectedIdChange,
 }: {
   name: string;
@@ -22,6 +23,7 @@ export function Combobox({
   defaultValue?: string;
   placeholder?: string;
   disabled?: boolean;
+  autoFocus?: boolean;
   onSelectedIdChange?: (id: string) => void;
 }) {
   const initialSelectedId = useMemo(() => {
@@ -65,6 +67,8 @@ export function Combobox({
         value={query}
         placeholder={placeholder}
         disabled={disabled}
+        autoFocus={autoFocus}
+        data-autofocus={autoFocus ? true : undefined}
         onChange={(e) => {
           const next = e.target.value;
           setQuery(next);
