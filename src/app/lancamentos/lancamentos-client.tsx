@@ -192,6 +192,22 @@ function todayIsoDate(): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+function isoDateInSelectedMonth(month: string, preferredDay: number | null): string {
+  const m = String(month ?? "").trim().match(/^(\d{4})-(\d{2})$/);
+  if (!m) return todayIsoDate();
+  const year = Number(m[1]);
+  const month1 = Number(m[2]);
+  if (!Number.isInteger(year) || !Number.isInteger(month1) || month1 < 1 || month1 > 12) return todayIsoDate();
+
+  const today = new Date();
+  const fallbackDay = today.getDate();
+  const desiredDay = preferredDay && preferredDay >= 1 && preferredDay <= 31 ? preferredDay : fallbackDay;
+
+  const daysInMonth = new Date(Date.UTC(year, month1, 0)).getUTCDate();
+  const day = Math.min(Math.max(1, desiredDay), daysInMonth);
+  return `${year}-${pad2(month1)}-${pad2(day)}`;
+}
+
 function ModalShell({
   title,
   children,
@@ -987,7 +1003,7 @@ export function LancamentosClient({
                 <input
                   type="date"
                   name="paidAt"
-                  defaultValue={todayIsoDate()}
+                  defaultValue={isoDateInSelectedMonth(month, payUtilityModal.item.dueDay)}
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
                 />
@@ -1163,7 +1179,7 @@ export function LancamentosClient({
                   <input
                     type="date"
                     name="paidAt"
-                    defaultValue={todayIsoDate()}
+                    defaultValue={isoDateInSelectedMonth(month, null)}
                     className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                     required
                   />
@@ -1193,7 +1209,7 @@ export function LancamentosClient({
                 <input
                   type="date"
                   name="confirmedAt"
-                  defaultValue={todayIsoDate()}
+                  defaultValue={isoDateInSelectedMonth(month, null)}
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
                 />
@@ -1803,7 +1819,7 @@ export function LancamentosClient({
                 <input
                   type="date"
                   name="paidAt"
-                  defaultValue={todayIsoDate()}
+                  defaultValue={isoDateInSelectedMonth(month, null)}
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
                 />
@@ -1874,7 +1890,7 @@ export function LancamentosClient({
                 <input
                   type="date"
                   name="receivedAt"
-                  defaultValue={todayIsoDate()}
+                  defaultValue={isoDateInSelectedMonth(month, receiveIncomeModal.item.dueDay)}
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
                 />
@@ -1965,7 +1981,7 @@ export function LancamentosClient({
               <input
                 type="date"
                 name="transferAt"
-                defaultValue={todayIsoDate()}
+                defaultValue={isoDateInSelectedMonth(month, null)}
                 className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                 required
               />
