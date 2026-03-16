@@ -891,6 +891,7 @@ export function LancamentosClient({
         </div>
       </div>
 
+
       {moveToCardModal.open && (
         <ModalShell title={`Mover para cartão — ${moveToCardModal.item.label}`} onClose={() => setMoveToCardModal({ open: false })}>
           <form

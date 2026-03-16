@@ -961,6 +961,7 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
           });
         }
       }
+
     });
   } catch {
     return false;
