@@ -260,7 +260,7 @@ export default async function LancamentosPage(props: {
     .sort((a, b) => a.label.localeCompare(b.label));
 
   const assignmentByForecastId = new Map(assignments.map((a) => [a.forecastId, a.creditCardId]));
-  const paidForecastIds = new Set(utilityPayments.map((p) => p.forecastId));
+  const paymentByForecastId = new Map(utilityPayments.map((p) => [p.forecastId, p] as const));
   const invoiceByCardId = new Map(invoicePayments.map((p) => [p.creditCardId, p.amountCents]));
 
   const overrideByForecastId = new Map(monthOverrides.map((o) => [o.forecastId, o]));
@@ -296,6 +296,7 @@ export default async function LancamentosPage(props: {
       dueDay: c.dueDay ?? (c.paidAt ? c.paidAt.getUTCDate() : null),
       paid: Boolean(c.paidAt),
       paidAmountCents: c.paidAmountCents ?? null,
+      paidAt: c.paidAt ? c.paidAt.toISOString().slice(0, 10) : null,
     }));
 
   type ManualChargeRow = (typeof manualCharges)[number];
@@ -322,7 +323,7 @@ export default async function LancamentosPage(props: {
 
     for (const t of transfers) {
       const d = t.transferAt;
-      const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      const date = `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
       rows.push({
         id: `transfer:${t.id}`,
         transferId: t.id,
@@ -352,14 +353,19 @@ export default async function LancamentosPage(props: {
 
   const directForecastItems = forecastOccurrences
     .filter((o) => !assignmentByForecastId.has(o.forecastId))
-    .map((o) => ({
-      kind: "forecast" as const,
-      forecastId: o.forecastId,
-      label: o.utilityAccountName,
-      amountCents: o.amountCents,
-      dueDay: o.dueDay,
-      paid: paidForecastIds.has(o.forecastId),
-    }));
+    .map((o) => {
+      const p = paymentByForecastId.get(o.forecastId) ?? null;
+      return {
+        kind: "forecast" as const,
+        forecastId: o.forecastId,
+        label: o.utilityAccountName,
+        amountCents: o.amountCents,
+        dueDay: o.dueDay,
+        paid: Boolean(p),
+        paidAmountCents: p?.amountCents ?? null,
+        paidAt: p?.paidAt ? p.paidAt.toISOString().slice(0, 10) : null,
+      };
+    });
 
   const directItems = [...directForecastItems, ...manualDirect]
     .sort((a, b) => {
@@ -376,7 +382,7 @@ export default async function LancamentosPage(props: {
       label: o.utilityAccountName,
       amountCents: o.amountCents,
       dueDay: o.dueDay,
-      paid: paidForecastIds.has(o.forecastId),
+      paid: paymentByForecastId.has(o.forecastId),
       onCard: assignmentByForecastId.has(o.forecastId),
     }))
     .sort((a, b) => a.label.localeCompare(b.label));

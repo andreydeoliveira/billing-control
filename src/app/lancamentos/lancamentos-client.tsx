@@ -81,6 +81,8 @@ type DirectItem =
       amountCents: number;
       dueDay: number | null;
       paid: boolean;
+      paidAmountCents: number | null;
+      paidAt: string | null; // YYYY-MM-DD
     }
   | {
       kind: "manual";
@@ -90,6 +92,7 @@ type DirectItem =
       dueDay: number | null;
       paid: boolean;
       paidAmountCents: number | null;
+      paidAt?: string | null; // YYYY-MM-DD
     };
 
 type CardItem =
@@ -190,6 +193,14 @@ function pad2(n: number) {
 function todayIsoDate(): string {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function dayFromIsoDateString(iso: string | null): string | null {
+  const s = String(iso ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return m[3];
 }
 
 function isoDateInSelectedMonth(month: string, preferredDay: number | null): string {
@@ -604,8 +615,29 @@ export function LancamentosClient({
                     className="border-t border-black/10 dark:border-white/10"
                   >
                     <td className="px-4 py-3">{it.label}</td>
-                    <td className="px-4 py-3">{it.dueDay ? String(it.dueDay) : "-"}</td>
-                    <td className="px-4 py-3 font-medium">{formatCents(it.amountCents)}</td>
+                    <td className="px-4 py-3">
+                      {it.paid && it.paidAt
+                        ? (dayFromIsoDateString(it.paidAt) ?? it.paidAt)
+                        : it.dueDay
+                          ? String(it.dueDay)
+                          : "-"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {it.paid ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium">
+                            {formatCents(
+                              it.kind === "forecast"
+                                ? it.paidAmountCents ?? it.amountCents
+                                : it.paidAmountCents ?? it.amountCents,
+                            )}
+                          </span>
+                          <span className="text-xs text-zinc-600 dark:text-zinc-400">Previsto: {formatCents(it.amountCents)}</span>
+                        </div>
+                      ) : (
+                        <span className="font-medium">{formatCents(it.amountCents)}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {it.paid ? (
                         <span className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">Pago</span>
