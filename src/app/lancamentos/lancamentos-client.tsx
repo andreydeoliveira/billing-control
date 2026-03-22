@@ -255,10 +255,12 @@ function ModalShell({
   title,
   children,
   onClose,
+  maxWidthClassName,
 }: {
   title: string;
   children: React.ReactNode;
   onClose: () => void;
+  maxWidthClassName?: string;
 }) {
   const contentRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -285,7 +287,9 @@ function ModalShell({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" aria-label="Fechar" onClick={onClose} className="absolute inset-0 bg-black/40" />
-      <div className="relative w-full max-w-xl rounded-2xl border border-black/10 bg-background p-5 shadow-sm dark:border-white/10">
+      <div
+        className={`relative w-full ${maxWidthClassName ?? "max-w-xl"} rounded-2xl border border-black/10 bg-background p-5 shadow-sm dark:border-white/10`}
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-base font-semibold">{title}</div>
@@ -1535,8 +1539,12 @@ export function LancamentosClient({
       ) : null}
 
       {manageCardModal.open && (
-        <ModalShell title={`Gerenciar — ${manageCardModal.creditCardName}`} onClose={() => setManageCardModal({ open: false })}>
-          <div className="grid gap-3">
+        <ModalShell
+          title={`Gerenciar — ${manageCardModal.creditCardName}`}
+          onClose={() => setManageCardModal({ open: false })}
+          maxWidthClassName="max-w-3xl"
+        >
+          <div className="grid max-h-[75vh] gap-3 overflow-auto pr-1">
             <div className="flex justify-end">
               <button
                 type="button"
@@ -1569,7 +1577,12 @@ export function LancamentosClient({
                     {manageCardModal.items.map((it) => (
                       <tr
                         key={it.kind === "forecast" ? it.forecastId : it.manualChargeId}
-                        className="border-t border-black/10 dark:border-white/10"
+                        className={
+                          (it.kind === "forecast" && it.confirmedAmountCents !== null) ||
+                          (it.kind === "manual" && (it.confirmedAmountCents ?? null) !== null)
+                            ? "border-t border-black/10 bg-emerald-500/10 dark:border-white/10"
+                            : "border-t border-black/10 dark:border-white/10"
+                        }
                       >
                         <td className="px-3 py-2">{it.label}</td>
                         <td className="px-3 py-2">
