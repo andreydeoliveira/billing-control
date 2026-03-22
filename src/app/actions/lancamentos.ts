@@ -639,6 +639,55 @@ export async function undoIncomeReceipt(formData: FormData): Promise<boolean> {
   return true;
 }
 
+const CreateIncomeEntrySchema = z.object({
+  incomeSourceId: IdSchema,
+  note: z.string().trim().max(80).optional(),
+  amountCents: z.number().int().min(1),
+  date: z.date(),
+});
+
+export async function createIncomeEntry(formData: FormData): Promise<boolean> {
+  const amountCents = parseMoneyToCents(formData.get("amount"));
+  if (amountCents === null) return false;
+  if (amountCents <= 0) return false;
+
+  const date = parseOptionalDate(formData.get("date"));
+  if (!date) return false;
+
+  const noteRaw = String(formData.get("note") ?? "").trim();
+
+  const parsed = CreateIncomeEntrySchema.safeParse({
+    incomeSourceId: formData.get("incomeSourceId"),
+    note: noteRaw ? noteRaw : undefined,
+    amountCents,
+    date,
+  });
+
+  if (!parsed.success) return false;
+
+  const incomeSource = await prisma.incomeSource.findUnique({
+    where: { id: parsed.data.incomeSourceId },
+    select: { id: true, name: true, status: true },
+  });
+  if (!incomeSource) return false;
+  if (incomeSource.status !== "ACTIVE") return false;
+
+  await prisma.transaction.create({
+    data: {
+      type: "INCOME",
+      amountCents: parsed.data.amountCents,
+      description: incomeSource.name,
+      category: parsed.data.note ?? null,
+      incomeSourceId: incomeSource.id,
+      date: parsed.data.date,
+    },
+  });
+
+  revalidatePath("/lancamentos");
+  revalidatePath("/dashboard");
+  return true;
+}
+
 export async function createBankTransfer(formData: FormData): Promise<boolean> {
   const parsed = z
     .object({
@@ -808,6 +857,7 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
       description: z.string().trim().min(1).max(120).optional(),
       amount: z.any(),
       dueDay: z.string().optional(),
+      occurredAt: z.string().optional(),
       creditCardId: z.string().optional(),
       bankAccountId: z.string().optional(),
       paidAt: z.string().optional(),
@@ -818,6 +868,7 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
       description: formData.get("description") ? String(formData.get("description")) : undefined,
       amount: formData.get("amount"),
       dueDay: formData.get("dueDay") ? String(formData.get("dueDay")) : undefined,
+      occurredAt: formData.get("occurredAt") ? String(formData.get("occurredAt")) : undefined,
       creditCardId: formData.get("creditCardId") ? String(formData.get("creditCardId")) : undefined,
       bankAccountId: formData.get("bankAccountId") ? String(formData.get("bankAccountId")) : undefined,
       paidAt: formData.get("paidAt") ? String(formData.get("paidAt")) : undefined,
@@ -832,6 +883,11 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
   const dueDayRaw = String(parsed.data.dueDay ?? "").trim();
   const dueDay = dueDayRaw.length ? Number(dueDayRaw) : undefined;
   if (dueDay !== undefined && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31)) return false;
+
+  const occurredAt = parsed.data.occurredAt ? parseOptionalDate(parsed.data.occurredAt) : undefined;
+  if (parsed.data.occurredAt && !occurredAt) return false;
+
+  const derivedDueDay = dueDay ?? (occurredAt ? occurredAt.getUTCDate() : undefined);
 
   const creditCardId = parsed.data.creditCardId?.trim();
   const bankAccountId = parsed.data.bankAccountId?.trim();
@@ -866,7 +922,8 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
             month,
             description,
             amountCents,
-            dueDay,
+            dueDay: derivedDueDay,
+            occurredAt,
             paidAt,
             bankAccountId,
             paidAmountCents: amountCents,
@@ -888,7 +945,8 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
         month,
         description,
         amountCents,
-        dueDay,
+        dueDay: derivedDueDay,
+        occurredAt,
         creditCardId: creditCardId && creditCardId.length ? creditCardId : null,
       },
     });
@@ -905,12 +963,14 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
       description: z.string().trim().min(1).max(120),
       amount: z.any(),
       dueDay: z.string().optional(),
+      occurredAt: z.string().optional(),
     })
     .safeParse({
       manualChargeId: formData.get("manualChargeId"),
       description: formData.get("description"),
       amount: formData.get("amount"),
       dueDay: formData.get("dueDay") ? String(formData.get("dueDay")) : undefined,
+      occurredAt: formData.get("occurredAt") ? String(formData.get("occurredAt")) : undefined,
     });
 
   if (!parsed.success) return false;
@@ -921,6 +981,10 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
   const dueDayRaw = String(parsed.data.dueDay ?? "").trim();
   const dueDay = dueDayRaw.length ? Number(dueDayRaw) : undefined;
   if (dueDay !== undefined && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31)) return false;
+
+  const occurredAtRaw = String(parsed.data.occurredAt ?? "").trim();
+  const occurredAt = occurredAtRaw.length ? parseOptionalDate(occurredAtRaw) : undefined;
+  if (occurredAtRaw.length && !occurredAt) return false;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -946,6 +1010,7 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
           description: parsed.data.description,
           amountCents,
           dueDay,
+          occurredAt,
           paidAmountCents: wasPaidDirect ? amountCents : undefined,
         },
       });

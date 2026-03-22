@@ -127,8 +127,10 @@ export default async function LancamentosPage(props: {
     bankAccounts,
     creditCards,
     utilityAccounts,
+    incomeSources,
     incomeForecasts,
     incomeReceipts,
+    incomeEntries,
     forecasts,
     assignments,
     utilityPayments,
@@ -152,6 +154,11 @@ export default async function LancamentosPage(props: {
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       }),
+      prisma.incomeSource.findMany({
+        where: { status: "ACTIVE" },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
       prisma.incomeForecast.findMany({
         where: {
           status: "ACTIVE",
@@ -169,6 +176,21 @@ export default async function LancamentosPage(props: {
         where: { month: monthStart },
         include: {
           bankAccount: { select: { id: true, name: true, bank: true } },
+          incomeSource: { select: { id: true, name: true } },
+        },
+      }),
+      prisma.transaction.findMany({
+        where: {
+          type: "INCOME",
+          date: { gte: monthStart, lt: monthEnd },
+        },
+        orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+        select: {
+          id: true,
+          date: true,
+          description: true,
+          category: true,
+          amountCents: true,
           incomeSource: { select: { id: true, name: true } },
         },
       }),
@@ -407,6 +429,7 @@ export default async function LancamentosPage(props: {
       label: c.description,
       amountCents: c.amountCents,
       dueDay: c.dueDay ?? null,
+      occurredAt: c.occurredAt ? c.occurredAt.toISOString().slice(0, 10) : null,
     }));
 
     const items = [...forecastItems, ...manualItems].sort((a, b) => {
@@ -435,7 +458,7 @@ export default async function LancamentosPage(props: {
     directItems.reduce((sum, it) => sum + it.amountCents, 0) + cardGroups.reduce((sum, g) => sum + g.totalCents, 0);
   const plannedNetCents = plannedIncomeCents - plannedExpenseCents;
 
-  const realizedIncomeCents = incomeReceipts.reduce((sum, r) => sum + r.amountCents, 0);
+  const realizedIncomeCents = incomeReceipts.reduce((sum, r) => sum + r.amountCents, 0) + incomeEntries.reduce((sum, e) => sum + e.amountCents, 0);
   const realizedExpenseCents =
     utilityPayments.reduce((sum, p) => sum + p.amountCents, 0) +
     invoicePayments.reduce((sum, p) => sum + p.amountCents, 0) +
@@ -460,7 +483,15 @@ export default async function LancamentosPage(props: {
       bankAccounts={bankAccounts}
       creditCards={creditCards}
       utilityAccounts={utilityAccounts}
+      incomeSources={incomeSources}
       incomeItems={incomeItems}
+      incomeEntries={incomeEntries.map((e) => ({
+        id: e.id,
+        date: e.date.toISOString().slice(0, 10),
+        description: e.incomeSource?.name ?? e.description,
+        category: e.category,
+        amountCents: e.amountCents,
+      }))}
       forecastChoices={forecastChoices}
       directItems={directItems}
       cardGroups={cardGroups}
