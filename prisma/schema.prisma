@@ -203,6 +203,7 @@ model UtilityAccount {
   status      Status @default(ACTIVE)
 
   forecasts Forecast[]
+  manualCharges ManualCharge[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -354,12 +355,19 @@ model ManualCharge {
   // Use the 1st day of the month (UTC) to represent the period.
   month DateTime
 
+  utilityAccountId String?
+  utilityAccount   UtilityAccount? @relation(fields: [utilityAccountId], references: [id], onDelete: SetNull)
+
   description String
   amountCents  Int
   dueDay       Int?
 
   // Optional: actual occurrence date (e.g. purchase date).
   occurredAt DateTime?
+
+  // Optional confirmation for card invoice items.
+  cardConfirmedAmountCents Int?
+  cardConfirmedAt          DateTime?
 
   // When set, this charge belongs to the credit card invoice of the month.
   creditCardId String?
@@ -375,6 +383,7 @@ model ManualCharge {
   updatedAt DateTime @updatedAt
 
   @@index([month])
+  @@index([utilityAccountId])
   @@index([creditCardId, month])
   @@index([bankAccountId, paidAt])
 }

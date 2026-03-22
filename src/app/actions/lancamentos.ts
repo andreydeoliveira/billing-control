@@ -59,7 +59,11 @@ function occursInMonth(forecast: ForecastLike, monthStart: Date): boolean {
 }
 
 function parseMoneyToCents(raw: unknown): number | null {
-  const s = String(raw ?? "").trim();
+  const s0 = String(raw ?? "").trim();
+  if (!s0) return null;
+
+  // Accept common user input like "R$ 1.234,56".
+  const s = s0.replace(/[^0-9,.-]/g, "").trim();
   if (!s) return null;
 
   const hasDot = s.includes(".");
@@ -289,6 +293,19 @@ export async function payCreditCardInvoice(formData: FormData): Promise<boolean>
     if (hasUnconfirmed) return false;
   }
 
+  // Enforce confirmation for manual charges on the card invoice (only when charge has occurredAt).
+  const unconfirmedManualOnCard = await prisma.manualCharge.findFirst({
+    where: {
+      creditCardId: parsed.data.creditCardId,
+      month,
+      occurredAt: { not: null },
+      OR: [{ cardConfirmedAmountCents: null }, { cardConfirmedAt: null }],
+    },
+    select: { id: true },
+  });
+
+  if (unconfirmedManualOnCard) return false;
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.creditCardInvoicePayment.create({
@@ -305,6 +322,86 @@ export async function payCreditCardInvoice(formData: FormData): Promise<boolean>
         where: { id: parsed.data.bankAccountId },
         data: { balanceCents: { decrement: amountCents } },
       });
+    });
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/lancamentos");
+  return true;
+}
+
+export async function confirmCardManualCharge(formData: FormData): Promise<boolean> {
+  const parsed = z
+    .object({ manualChargeId: IdSchema, month: z.string().min(1), amount: z.any(), confirmedAt: z.string().min(1) })
+    .safeParse({
+      manualChargeId: formData.get("manualChargeId"),
+      month: formData.get("month"),
+      amount: formData.get("amount"),
+      confirmedAt: formData.get("confirmedAt"),
+    });
+
+  if (!parsed.success) return false;
+  const month = parseOptionalYearMonth(parsed.data.month);
+  const confirmedAt = parseOptionalDate(parsed.data.confirmedAt);
+  const amountCents = parseMoneyToCents(parsed.data.amount);
+  if (!month || !confirmedAt || amountCents === null) return false;
+  if (amountCents <= 0) return false;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.manualCharge.findUnique({
+        where: { id: parsed.data.manualChargeId },
+        select: { id: true, month: true, creditCardId: true, paidAt: true },
+      });
+      if (!existing) throw new Error("not_found");
+      if (!existing.creditCardId) throw new Error("not_card");
+      if (existing.paidAt) throw new Error("paid_direct");
+      if (existing.month.getTime() !== month.getTime()) throw new Error("wrong_month");
+
+      await tx.manualCharge.update({
+        where: { id: existing.id },
+        data: {
+          amountCents,
+          occurredAt: confirmedAt,
+          dueDay: confirmedAt.getUTCDate(),
+          cardConfirmedAmountCents: amountCents,
+          cardConfirmedAt: confirmedAt,
+        },
+      });
+    });
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/lancamentos");
+  return true;
+}
+
+export async function unconfirmCardManualCharge(formData: FormData): Promise<boolean> {
+  const parsed = z.object({ manualChargeId: IdSchema, month: z.string().min(1) }).safeParse({
+    manualChargeId: formData.get("manualChargeId"),
+    month: formData.get("month"),
+  });
+  if (!parsed.success) return false;
+  const month = parseOptionalYearMonth(parsed.data.month);
+  if (!month) return false;
+
+  try {
+    const existing = await prisma.manualCharge.findUnique({
+      where: { id: parsed.data.manualChargeId },
+      select: { id: true, month: true, creditCardId: true },
+    });
+    if (!existing) return false;
+    if (!existing.creditCardId) return false;
+    if (existing.month.getTime() !== month.getTime()) return false;
+
+    await prisma.manualCharge.update({
+      where: { id: existing.id },
+      data: {
+        cardConfirmedAmountCents: null,
+        cardConfirmedAt: null,
+      },
     });
   } catch {
     return false;
@@ -884,14 +981,18 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
   const dueDay = dueDayRaw.length ? Number(dueDayRaw) : undefined;
   if (dueDay !== undefined && (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31)) return false;
 
+  const creditCardId = parsed.data.creditCardId?.trim() || undefined;
+  const bankAccountId = parsed.data.bankAccountId?.trim() || undefined;
+  const paidAt = parsed.data.paidAt ? parseOptionalDate(parsed.data.paidAt) : undefined;
+
   const occurredAt = parsed.data.occurredAt ? parseOptionalDate(parsed.data.occurredAt) : undefined;
   if (parsed.data.occurredAt && !occurredAt) return false;
 
-  const derivedDueDay = dueDay ?? (occurredAt ? occurredAt.getUTCDate() : undefined);
+  if (creditCardId && !occurredAt) return false;
 
-  const creditCardId = parsed.data.creditCardId?.trim();
-  const bankAccountId = parsed.data.bankAccountId?.trim();
-  const paidAt = parsed.data.paidAt ? parseOptionalDate(parsed.data.paidAt) : undefined;
+  const derivedDueDay = creditCardId
+    ? occurredAt.getUTCDate()
+    : dueDay ?? (occurredAt ? occurredAt.getUTCDate() : undefined);
 
   if ((bankAccountId && !paidAt) || (!bankAccountId && paidAt)) return false;
   if (creditCardId && (bankAccountId || paidAt)) return false;
@@ -920,6 +1021,7 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
         await tx.manualCharge.create({
           data: {
             month,
+            utilityAccountId: hasUtilityAccount ? utilityAccountId! : null,
             description,
             amountCents,
             dueDay: derivedDueDay,
@@ -928,6 +1030,8 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
             bankAccountId,
             paidAmountCents: amountCents,
             creditCardId: null,
+            cardConfirmedAmountCents: null,
+            cardConfirmedAt: null,
           },
         });
 
@@ -943,11 +1047,14 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
     await prisma.manualCharge.create({
       data: {
         month,
+        utilityAccountId: hasUtilityAccount ? utilityAccountId! : null,
         description,
         amountCents,
         dueDay: derivedDueDay,
         occurredAt,
         creditCardId: creditCardId && creditCardId.length ? creditCardId : null,
+        cardConfirmedAmountCents: null,
+        cardConfirmedAt: null,
       },
     });
   }
@@ -996,6 +1103,7 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
           paidAmountCents: true,
           paidAt: true,
           bankAccountId: true,
+          creditCardId: true,
         },
       });
 
@@ -1004,12 +1112,14 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
       const wasPaidDirect = Boolean(existing.paidAt && existing.bankAccountId);
       const oldPaidCents = wasPaidDirect ? (existing.paidAmountCents ?? existing.amountCents) : null;
 
+      const derivedDueDay = existing.creditCardId && occurredAt ? occurredAt.getUTCDate() : dueDay;
+
       await tx.manualCharge.update({
         where: { id: existing.id },
         data: {
           description: parsed.data.description,
           amountCents,
-          dueDay,
+          dueDay: derivedDueDay,
           occurredAt,
           paidAmountCents: wasPaidDirect ? amountCents : undefined,
         },

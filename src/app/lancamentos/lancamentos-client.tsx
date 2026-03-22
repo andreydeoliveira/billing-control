@@ -9,6 +9,7 @@ import {
   assignForecastToCard,
   assignManualChargeToCard,
   confirmCardForecastAmount,
+  confirmCardManualCharge,
   createIncomeEntry,
   createBankTransfer,
   createManualCharge,
@@ -24,6 +25,7 @@ import {
   unassignForecastFromCard,
   unassignManualChargeFromCard,
   unconfirmCardForecastAmount,
+  unconfirmCardManualCharge,
   updateManualCharge,
   updateBankTransfer,
   deleteBankTransfer,
@@ -125,8 +127,11 @@ type CardItem =
       manualChargeId: string;
       label: string;
       amountCents: number;
+      originalAmountCents: number;
       dueDay: number | null;
       occurredAt?: string | null; // YYYY-MM-DD
+      confirmedAmountCents?: number | null;
+      confirmedAt?: string | null; // YYYY-MM-DD
     };
 
 type CardGroup = {
@@ -184,7 +189,11 @@ function formatSignedCents(cents: number): string {
 }
 
 function parseMoneyToCents(raw: unknown): number | null {
-  const s = String(raw ?? "").trim();
+  const s0 = String(raw ?? "").trim();
+  if (!s0) return null;
+
+  // Accept common user input like "R$ 1.234,56".
+  const s = s0.replace(/[^0-9,.-]/g, "").trim();
   if (!s) return null;
 
   const hasDot = s.includes(".");
@@ -336,6 +345,20 @@ type ConfirmCardItemModalState =
       label: string;
       amountCents: number;
       originalAmountCents: number;
+      dueDay: number | null;
+      confirmedAmountCents: number | null;
+      confirmedAt: string | null;
+    };
+
+type ConfirmCardManualModalState =
+  | { open: false }
+  | {
+      open: true;
+      manualChargeId: string;
+      label: string;
+      amountCents: number;
+      originalAmountCents: number;
+      dueDay: number | null;
       confirmedAmountCents: number | null;
       confirmedAt: string | null;
     };
@@ -359,6 +382,7 @@ type EditManualChargeModalState =
       amountCents: number;
       dueDay: number | null;
       occurredAt: string | null; // YYYY-MM-DD
+      isCard: boolean;
     };
 
 type EditTransferModalState =
@@ -437,6 +461,7 @@ export function LancamentosClient({
   const [payUtilityModal, setPayUtilityModal] = React.useState<PayUtilityModalState>({ open: false });
   const [manageCardModal, setManageCardModal] = React.useState<ManageCardModalState>({ open: false });
   const [confirmCardItemModal, setConfirmCardItemModal] = React.useState<ConfirmCardItemModalState>({ open: false });
+  const [confirmCardManualModal, setConfirmCardManualModal] = React.useState<ConfirmCardManualModalState>({ open: false });
   const [payInvoiceModal, setPayInvoiceModal] = React.useState<PayInvoiceModalState>({ open: false });
   const [receiveIncomeModal, setReceiveIncomeModal] = React.useState<ReceiveIncomeModalState>({ open: false });
   const [newIncomeEntryModal, setNewIncomeEntryModal] = React.useState<NewIncomeEntryModalState>({ open: false });
@@ -780,6 +805,7 @@ export function LancamentosClient({
                                     amountCents: it.amountCents,
                                     dueDay: it.dueDay,
                                       occurredAt: null,
+                                    isCard: false,
                                   })
                                 }
                                 className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
@@ -1035,12 +1061,6 @@ export function LancamentosClient({
 
                 if (!assignOk) return;
 
-                const confirmNow = String(fd.get("confirmNow") ?? "") === "on";
-                if (!confirmNow) {
-                  setMoveToCardModal({ open: false });
-                  return;
-                }
-
                 const confirmOk = await runAction(
                   confirmCardForecastAmount,
                   (() => {
@@ -1097,34 +1117,27 @@ export function LancamentosClient({
 
             {moveToCardModal.item.kind === "forecast" ? (
               <div className="grid gap-3 rounded-xl border border-black/10 bg-black/5 p-3 text-sm dark:border-white/10 dark:bg-white/10">
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="confirmNow" defaultChecked className="h-4 w-4" />
-                  <span className="text-sm text-zinc-700 dark:text-zinc-200">Confirmar agora (valor e data)</span>
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor confirmado</span>
+                  <input
+                    name="amount"
+                    inputMode="decimal"
+                    defaultValue={(moveToCardModal.item.amountCents / 100).toFixed(2).replace(".", ",")}
+                    className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                    required
+                  />
                 </label>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <label className="grid gap-1">
-                    <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor confirmado</span>
-                    <input
-                      name="amount"
-                      inputMode="decimal"
-                      defaultValue={(moveToCardModal.item.amountCents / 100).toFixed(2).replace(".", ",")}
-                      className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                      required
-                    />
-                  </label>
-
-                  <label className="grid gap-1">
-                    <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
-                    <input
-                      type="date"
-                      name="confirmedAt"
-                      defaultValue={isoDateInSelectedMonth(month, moveToCardModal.item.dueDay)}
-                      className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                      required
-                    />
-                  </label>
-                </div>
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                  <input
+                    type="date"
+                    name="confirmedAt"
+                    defaultValue={isoDateInSelectedMonth(month, moveToCardModal.item.dueDay)}
+                    className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                    required
+                  />
+                </label>
               </div>
             ) : null}
 
@@ -1221,7 +1234,10 @@ export function LancamentosClient({
           <form
             action={async (fd) => {
               const utilityAccountId = String(fd.get("utilityAccountId") ?? "");
-              if (!utilityAccountId) return;
+              if (!utilityAccountId) {
+                window.alert("Selecione uma conta (clique na opção da lista).");
+                return;
+              }
 
               const paymentKind = String(fd.get("paymentKind") ?? "bank");
               const info = bestForecastForUtility.get(utilityAccountId) ?? null;
@@ -1244,7 +1260,14 @@ export function LancamentosClient({
 
                 const creditCardId = String(fd.get("creditCardId") ?? "");
                 const confirmedAt = String(fd.get("confirmedAt") ?? "");
-                if (!creditCardId || !confirmedAt) return;
+                if (!creditCardId) {
+                  window.alert("Selecione o cartão.");
+                  return;
+                }
+                if (!confirmedAt) {
+                  window.alert("Preencha a data.");
+                  return;
+                }
 
                 const assign = new FormData();
                 assign.set("forecastId", forecastId);
@@ -1273,14 +1296,37 @@ export function LancamentosClient({
                 x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
                 x.set("paidAt", String(fd.get("paidAt") ?? ""));
               } else {
-                x.set("creditCardId", String(fd.get("creditCardId") ?? ""));
+                const creditCardId = String(fd.get("creditCardId") ?? "");
+                if (!creditCardId) {
+                  window.alert("Selecione o cartão.");
+                  return;
+                }
+                x.set("creditCardId", creditCardId);
 
-                const occurredAtRaw = String(fd.get("occurredAt") ?? "").trim();
-                if (occurredAtRaw.length) x.set("occurredAt", occurredAtRaw);
+                const occurredAt = String(fd.get("occurredAt") ?? "").trim();
+                if (!occurredAt) {
+                  window.alert("Preencha a data do lançamento.");
+                  return;
+                }
+                x.set("occurredAt", occurredAt);
+
+                const amountRaw = String(fd.get("amount") ?? "");
+                const amountCents = parseMoneyToCents(amountRaw);
+                if (amountCents === null || amountCents <= 0) {
+                  window.alert("Preencha um valor válido (ex: 12,34). ");
+                  return;
+                }
               }
 
               const ok = await runAction(createManualCharge, x);
-              if (ok) setNewChargeModal({ open: false });
+              if (ok) {
+                setNewChargeModal({ open: false });
+                if (paymentKind === "card" && !info?.usable) {
+                  window.alert("Lançado no cartão. Veja em Cartões (fatura) → Gerenciar contas (mês selecionado).");
+                }
+              } else {
+                window.alert("Não foi possível adicionar. Revise valor e data.");
+              }
             }}
             className="grid gap-3"
           >
@@ -1404,12 +1450,13 @@ export function LancamentosClient({
 
             {newChargePaymentKind === "card" && !hasUsableForecastForSelected ? (
               <label className="grid gap-1">
-                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data (opcional)</span>
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
                 <input
                   type="date"
                   name="occurredAt"
                   defaultValue={isoDateInSelectedMonth(month, null)}
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
                 />
               </label>
             ) : null}
@@ -1537,6 +1584,8 @@ export function LancamentosClient({
                             <span className="font-medium">{formatCents(it.amountCents)}</span>
                             {it.kind === "forecast" && it.confirmedAmountCents !== null ? (
                               <span className="text-xs text-emerald-700 dark:text-emerald-300">Confirmado</span>
+                            ) : it.kind === "manual" && (it.confirmedAmountCents ?? null) !== null ? (
+                              <span className="text-xs text-emerald-700 dark:text-emerald-300">Confirmado</span>
                             ) : null}
                           </div>
                         </td>
@@ -1552,6 +1601,7 @@ export function LancamentosClient({
                                     label: it.label,
                                     amountCents: it.amountCents,
                                     originalAmountCents: it.originalAmountCents,
+                                    dueDay: it.dueDay,
                                     confirmedAmountCents: it.confirmedAmountCents,
                                     confirmedAt: it.confirmedAt,
                                   })
@@ -1566,18 +1616,20 @@ export function LancamentosClient({
                               <button
                                 type="button"
                                 onClick={() =>
-                                  setEditManualChargeModal({
+                                  setConfirmCardManualModal({
                                     open: true,
                                     manualChargeId: it.manualChargeId,
-                                    description: it.label,
+                                    label: it.label,
                                     amountCents: it.amountCents,
+                                    originalAmountCents: it.originalAmountCents,
                                     dueDay: it.dueDay,
-                                    occurredAt: it.occurredAt ?? null,
+                                    confirmedAmountCents: it.confirmedAmountCents ?? null,
+                                    confirmedAt: it.confirmedAt ?? null,
                                   })
                                 }
                                 className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
                               >
-                                Editar
+                                {it.confirmedAmountCents ? "Editar confirmação" : "Confirmar valor"}
                               </button>
                             ) : null}
 
@@ -1737,40 +1789,59 @@ export function LancamentosClient({
               const x = new FormData();
               x.set("month", month);
               x.set("creditCardId", addCardChargeModal.creditCardId);
-              x.set("description", String(fd.get("description") ?? ""));
-              x.set("amount", String(fd.get("amount") ?? ""));
+              const utilityAccountId = String(fd.get("utilityAccountId") ?? "").trim();
+              if (!utilityAccountId) {
+                window.alert("Selecione uma conta (clique na opção da lista).");
+                return;
+              }
+              x.set("utilityAccountId", utilityAccountId);
 
-              const dueDayRaw = String(fd.get("dueDay") ?? "").trim();
-              if (dueDayRaw.length) x.set("dueDay", dueDayRaw);
+              const amountRaw = String(fd.get("amount") ?? "");
+              x.set("amount", amountRaw);
 
-              const occurredAtRaw = String(fd.get("occurredAt") ?? "").trim();
-              if (occurredAtRaw.length) x.set("occurredAt", occurredAtRaw);
+              const occurredAt = String(fd.get("occurredAt") ?? "").trim();
+              if (!occurredAt) {
+                window.alert("Preencha a data do lançamento.");
+                return;
+              }
+              x.set("occurredAt", occurredAt);
+
+              const amountCents = parseMoneyToCents(amountRaw);
+              if (amountCents === null || amountCents <= 0) {
+                window.alert("Preencha um valor válido (ex: 12,34). ");
+                return;
+              }
 
               const ok = await runAction(createManualCharge, x);
               if (ok) {
                 setAddCardChargeModal({ open: false });
                 setManageCardModal({ open: false });
+              } else {
+                window.alert("Não foi possível adicionar. Verifique valor e data.");
               }
             }}
             className="grid gap-3"
           >
             <label className="grid gap-1">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Descrição</span>
-              <input
-                name="description"
-                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                required
-                data-autofocus
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta</span>
+              <Combobox
+                name="utilityAccountId"
+                options={utilityAccounts.map((u) => ({ id: u.id, label: u.name }))}
+                placeholder={utilityAccounts.length === 0 ? "Cadastre uma conta antes" : "Digite para buscar..."}
+                disabled={utilityAccounts.length === 0}
+                autoFocus
               />
             </label>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="grid gap-1">
-                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data (opcional)</span>
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
                 <input
                   type="date"
                   name="occurredAt"
+                  defaultValue={isoDateInSelectedMonth(month, null)}
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
                 />
               </label>
 
@@ -1785,16 +1856,6 @@ export function LancamentosClient({
                 />
               </label>
             </div>
-
-            <label className="grid gap-1">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Dia (opcional)</span>
-              <input
-                name="dueDay"
-                inputMode="numeric"
-                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                placeholder="1-31"
-              />
-            </label>
 
             <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
               Adicionar
@@ -1815,8 +1876,10 @@ export function LancamentosClient({
               const occurredAtRaw = String(fd.get("occurredAt") ?? "").trim();
               if (occurredAtRaw.length) x.set("occurredAt", occurredAtRaw);
 
-              const dueDayRaw = String(fd.get("dueDay") ?? "").trim();
-              if (dueDayRaw.length) x.set("dueDay", dueDayRaw);
+              if (!editManualChargeModal.isCard) {
+                const dueDayRaw = String(fd.get("dueDay") ?? "").trim();
+                if (dueDayRaw.length) x.set("dueDay", dueDayRaw);
+              }
 
               const ok = await runAction(updateManualCharge, x);
               if (ok) setEditManualChargeModal({ open: false });
@@ -1824,12 +1887,13 @@ export function LancamentosClient({
             className="grid gap-3"
           >
             <label className="grid gap-1">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data (opcional)</span>
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
               <input
                 type="date"
                 name="occurredAt"
                 defaultValue={editManualChargeModal.occurredAt ?? ""}
                 className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required={editManualChargeModal.isCard}
               />
             </label>
 
@@ -1845,16 +1909,18 @@ export function LancamentosClient({
             </label>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Dia (opcional)</span>
-                <input
-                  name="dueDay"
-                  inputMode="numeric"
-                  defaultValue={editManualChargeModal.dueDay ? String(editManualChargeModal.dueDay) : ""}
-                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                  placeholder="1-31"
-                />
-              </label>
+              {!editManualChargeModal.isCard ? (
+                <label className="grid gap-1">
+                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Dia (opcional)</span>
+                  <input
+                    name="dueDay"
+                    inputMode="numeric"
+                    defaultValue={editManualChargeModal.dueDay ? String(editManualChargeModal.dueDay) : ""}
+                    className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                    placeholder="1-31"
+                  />
+                </label>
+              ) : null}
 
               <label className="grid gap-1">
                 <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
@@ -2016,7 +2082,7 @@ export function LancamentosClient({
               <input
                 type="date"
                 name="confirmedAt"
-                defaultValue={confirmCardItemModal.confirmedAt ?? todayIsoDate()}
+                defaultValue={confirmCardItemModal.confirmedAt ?? isoDateInSelectedMonth(month, confirmCardItemModal.dueDay)}
                 className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                 required
               />
@@ -2060,6 +2126,116 @@ export function LancamentosClient({
                   });
 
                   setConfirmCardItemModal({ open: false });
+                }}
+                className="h-10 rounded-lg px-4 text-sm font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+              >
+                Desfazer confirmação
+              </button>
+            ) : null}
+          </form>
+        </ModalShell>
+      )}
+
+      {confirmCardManualModal.open && (
+        <ModalShell title={`Confirmar valor — ${confirmCardManualModal.label}`} onClose={() => setConfirmCardManualModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const amountRaw = String(fd.get("amount") ?? "");
+              const confirmedAt = String(fd.get("confirmedAt") ?? "");
+              const amountCents = parseMoneyToCents(amountRaw);
+              if (amountCents === null) return;
+
+              const x = new FormData();
+              x.set("manualChargeId", confirmCardManualModal.manualChargeId);
+              x.set("month", month);
+              x.set("amount", amountRaw);
+              x.set("confirmedAt", confirmedAt);
+              const ok = await runAction(confirmCardManualCharge, x);
+              if (!ok) return;
+
+              setManageCardModal((cur) => {
+                if (!cur.open) return cur;
+                return {
+                  ...cur,
+                  items: cur.items.map((it) =>
+                    it.kind === "manual" && it.manualChargeId === confirmCardManualModal.manualChargeId
+                      ? {
+                          ...it,
+                          amountCents,
+                          confirmedAmountCents: amountCents,
+                          confirmedAt,
+                          occurredAt: confirmedAt,
+                          dueDay: dayFromIsoDate(confirmedAt) ?? it.dueDay,
+                        }
+                      : it,
+                  ),
+                };
+              });
+
+              setConfirmCardManualModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                defaultValue={(((confirmCardManualModal.confirmedAmountCents ?? confirmCardManualModal.amountCents) as number) / 100)
+                  .toFixed(2)
+                  .replace(".", ",")}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+              <input
+                type="date"
+                name="confirmedAt"
+                defaultValue={confirmCardManualModal.confirmedAt ?? isoDateInSelectedMonth(month, confirmCardManualModal.dueDay)}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Confirmar
+            </button>
+
+            {confirmCardManualModal.confirmedAmountCents !== null ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await runAction(
+                    unconfirmCardManualCharge,
+                    (() => {
+                      const x = new FormData();
+                      x.set("manualChargeId", confirmCardManualModal.manualChargeId);
+                      x.set("month", month);
+                      return x;
+                    })(),
+                  );
+                  if (!ok) return;
+
+                  setManageCardModal((cur) => {
+                    if (!cur.open) return cur;
+                    return {
+                      ...cur,
+                      items: cur.items.map((it) =>
+                        it.kind === "manual" && it.manualChargeId === confirmCardManualModal.manualChargeId
+                          ? {
+                              ...it,
+                              confirmedAmountCents: null,
+                              confirmedAt: null,
+                            }
+                          : it,
+                      ),
+                    };
+                  });
+
+                  setConfirmCardManualModal({ open: false });
                 }}
                 className="h-10 rounded-lg px-4 text-sm font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
               >

@@ -427,9 +427,12 @@ export default async function LancamentosPage(props: {
       kind: "manual" as const,
       manualChargeId: c.id,
       label: c.description,
-      amountCents: c.amountCents,
+      amountCents: c.cardConfirmedAmountCents ?? c.amountCents,
+      originalAmountCents: c.amountCents,
       dueDay: c.dueDay ?? null,
       occurredAt: c.occurredAt ? c.occurredAt.toISOString().slice(0, 10) : null,
+      confirmedAmountCents: c.cardConfirmedAmountCents ?? null,
+      confirmedAt: c.cardConfirmedAt ? c.cardConfirmedAt.toISOString().slice(0, 10) : null,
     }));
 
     const items = [...forecastItems, ...manualItems].sort((a, b) => {
@@ -440,7 +443,9 @@ export default async function LancamentosPage(props: {
     });
 
     const totalCents = items.reduce((sum, it) => sum + it.amountCents, 0);
-    const unconfirmedForecastCount = forecastItems.filter((it) => it.confirmedAmountCents === null).length;
+    const unconfirmedForecastCount =
+      forecastItems.filter((it) => it.confirmedAmountCents === null).length +
+      manualItems.filter((it) => it.occurredAt && it.confirmedAmountCents === null).length;
     const paidAmountCents = invoiceByCardId.get(card.id) ?? null;
     return {
       creditCardId: card.id,
