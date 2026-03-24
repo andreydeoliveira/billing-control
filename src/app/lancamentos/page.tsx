@@ -229,6 +229,7 @@ export default async function LancamentosPage(props: {
         orderBy: [{ dueDay: "asc" }, { description: "asc" }],
         include: {
           bankAccount: { select: { id: true, name: true } },
+          utilityAccount: { select: { id: true, name: true } },
         },
       }),
       prisma.bankTransfer.findMany({
@@ -313,7 +314,7 @@ export default async function LancamentosPage(props: {
     .map((c) => ({
       kind: "manual" as const,
       manualChargeId: c.id,
-      label: c.description,
+      label: c.utilityAccount?.name ?? c.description,
       amountCents: c.amountCents,
       dueDay: c.dueDay ?? (c.paidAt ? c.paidAt.getUTCDate() : null),
       paid: Boolean(c.paidAt),
@@ -426,7 +427,8 @@ export default async function LancamentosPage(props: {
     const manualItems = (manualByCardId.get(card.id) ?? []).map((c) => ({
       kind: "manual" as const,
       manualChargeId: c.id,
-      label: c.description,
+      label: c.utilityAccount?.name ?? c.description,
+      observation: c.observation ?? null,
       amountCents: c.cardConfirmedAmountCents ?? c.amountCents,
       originalAmountCents: c.amountCents,
       dueDay: c.dueDay ?? null,
@@ -435,17 +437,27 @@ export default async function LancamentosPage(props: {
       confirmedAt: c.cardConfirmedAt ? c.cardConfirmedAt.toISOString().slice(0, 10) : null,
     }));
 
+    function sortKey(it: (typeof forecastItems)[number] | (typeof manualItems)[number]): number {
+      // Prefer the most "real" date for ordering.
+      const iso =
+        it.kind === "manual"
+          ? it.occurredAt ?? it.confirmedAt
+          : it.confirmedAt ?? (it.dueDay ? `${monthStart.getUTCFullYear()}-${pad2(monthStart.getUTCMonth() + 1)}-${pad2(it.dueDay)}` : null);
+
+      if (!iso) return 0;
+      const t = Date.parse(`${iso}T00:00:00.000Z`);
+      return Number.isFinite(t) ? t : 0;
+    }
+
     const items = [...forecastItems, ...manualItems].sort((a, b) => {
-      const ad = a.dueDay ?? 99;
-      const bd = b.dueDay ?? 99;
-      if (ad !== bd) return ad - bd;
+      const at = sortKey(a);
+      const bt = sortKey(b);
+      if (at !== bt) return bt - at; // desc
       return a.label.localeCompare(b.label);
     });
 
     const totalCents = items.reduce((sum, it) => sum + it.amountCents, 0);
-    const unconfirmedForecastCount =
-      forecastItems.filter((it) => it.confirmedAmountCents === null).length +
-      manualItems.filter((it) => it.occurredAt && it.confirmedAmountCents === null).length;
+    const unconfirmedForecastCount = forecastItems.filter((it) => it.confirmedAmountCents === null).length;
     const paidAmountCents = invoiceByCardId.get(card.id) ?? null;
     return {
       creditCardId: card.id,
@@ -473,6 +485,25 @@ export default async function LancamentosPage(props: {
   const realizedNetCents = realizedIncomeCents - realizedExpenseCents;
   const deltaNetCents = realizedNetCents - plannedNetCents;
 
+  const confirmedCardExpenseCents = cardGroups.reduce(
+    (sum, g) =>
+      sum +
+      g.items.reduce((s, it) => {
+        if (it.kind === "forecast") return s + (it.confirmedAmountCents ?? 0);
+        return s + (it.confirmedAmountCents ?? 0);
+      }, 0),
+    0,
+  );
+
+  const confirmedExpenseCents =
+    utilityPayments.reduce((sum, p) => sum + p.amountCents, 0) +
+    manualCharges
+      .filter((c) => !c.creditCardId && c.paidAt)
+      .reduce((sum, c) => sum + (c.paidAmountCents ?? c.amountCents), 0) +
+    confirmedCardExpenseCents;
+
+  const confirmedNetCents = realizedIncomeCents - confirmedExpenseCents;
+
   return (
     <LancamentosClient
       month={month}
@@ -484,6 +515,8 @@ export default async function LancamentosPage(props: {
         realizedExpenseCents,
         realizedNetCents,
         deltaNetCents,
+        confirmedExpenseCents,
+        confirmedNetCents,
       }}
       bankAccounts={bankAccounts}
       creditCards={creditCards}

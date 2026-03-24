@@ -359,6 +359,7 @@ model ManualCharge {
   utilityAccount   UtilityAccount? @relation(fields: [utilityAccountId], references: [id], onDelete: SetNull)
 
   description String
+  observation String?
   amountCents  Int
   dueDay       Int?
 

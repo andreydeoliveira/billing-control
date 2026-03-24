@@ -9,7 +9,6 @@ import {
   assignForecastToCard,
   assignManualChargeToCard,
   confirmCardForecastAmount,
-  confirmCardManualCharge,
   createIncomeEntry,
   createBankTransfer,
   createManualCharge,
@@ -24,8 +23,8 @@ import {
   undoUtilityForecastPayment,
   unassignForecastFromCard,
   unassignManualChargeFromCard,
-  unconfirmCardForecastAmount,
   unconfirmCardManualCharge,
+  unconfirmCardForecastAmount,
   updateManualCharge,
   updateBankTransfer,
   deleteBankTransfer,
@@ -126,6 +125,7 @@ type CardItem =
       kind: "manual";
       manualChargeId: string;
       label: string;
+      observation: string | null;
       amountCents: number;
       originalAmountCents: number;
       dueDay: number | null;
@@ -173,6 +173,8 @@ type MonthSummary = {
   realizedExpenseCents: number;
   realizedNetCents: number;
   deltaNetCents: number;
+  confirmedExpenseCents: number;
+  confirmedNetCents: number;
 };
 
 function formatCents(cents: number): string {
@@ -284,6 +286,21 @@ function ModalShell({
     return () => clearTimeout(t);
   }, []);
 
+  React.useEffect(() => {
+    const body = document.body;
+    const prevOverflow = body.style.overflow;
+    const prevPaddingRight = body.style.paddingRight;
+
+    const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
+    body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) body.style.paddingRight = `${scrollbarWidth}px`;
+
+    return () => {
+      body.style.overflow = prevOverflow;
+      body.style.paddingRight = prevPaddingRight;
+    };
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" aria-label="Fechar" onClick={onClose} className="absolute inset-0 bg-black/40" />
@@ -354,18 +371,6 @@ type ConfirmCardItemModalState =
       confirmedAt: string | null;
     };
 
-type ConfirmCardManualModalState =
-  | { open: false }
-  | {
-      open: true;
-      manualChargeId: string;
-      label: string;
-      amountCents: number;
-      originalAmountCents: number;
-      dueDay: number | null;
-      confirmedAmountCents: number | null;
-      confirmedAt: string | null;
-    };
 
 type PayInvoiceModalState =
   | { open: false }
@@ -383,6 +388,7 @@ type EditManualChargeModalState =
       open: true;
       manualChargeId: string;
       description: string;
+      observation: string | null;
       amountCents: number;
       dueDay: number | null;
       occurredAt: string | null; // YYYY-MM-DD
@@ -465,7 +471,6 @@ export function LancamentosClient({
   const [payUtilityModal, setPayUtilityModal] = React.useState<PayUtilityModalState>({ open: false });
   const [manageCardModal, setManageCardModal] = React.useState<ManageCardModalState>({ open: false });
   const [confirmCardItemModal, setConfirmCardItemModal] = React.useState<ConfirmCardItemModalState>({ open: false });
-  const [confirmCardManualModal, setConfirmCardManualModal] = React.useState<ConfirmCardManualModalState>({ open: false });
   const [payInvoiceModal, setPayInvoiceModal] = React.useState<PayInvoiceModalState>({ open: false });
   const [receiveIncomeModal, setReceiveIncomeModal] = React.useState<ReceiveIncomeModalState>({ open: false });
   const [newIncomeEntryModal, setNewIncomeEntryModal] = React.useState<NewIncomeEntryModalState>({ open: false });
@@ -490,8 +495,6 @@ export function LancamentosClient({
     return map;
   }, [forecastChoices, utilityAccounts]);
 
-  const hasUsableForecastForSelected = Boolean(bestForecastForUtility.get(newChargeUtilityAccountId)?.usable);
-
   React.useEffect(() => {
     if (!newChargeModal.open) return;
     setNewChargePaymentKind(bankAccounts.length > 0 ? "bank" : "card");
@@ -506,6 +509,20 @@ export function LancamentosClient({
     setNewIncomeSourceId("");
   }, [newIncomeEntryModal.open]);
 
+  React.useEffect(() => {
+    if (!manageCardModal.open) return;
+    const group = cardGroups.find((g) => g.creditCardId === manageCardModal.creditCardId);
+    if (!group) return;
+    setManageCardModal((cur) => {
+      if (!cur.open) return cur;
+      return {
+        ...cur,
+        creditCardName: group.creditCardName,
+        items: group.items,
+      };
+    });
+  }, [cardGroups, manageCardModal.open, manageCardModal.creditCardId]);
+
   async function runAction(action: (fd: FormData) => Promise<boolean>, fd: FormData) {
     const ok = await action(fd);
     if (ok) router.refresh();
@@ -514,54 +531,59 @@ export function LancamentosClient({
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Lançamentos</h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">Previsões do mês, faturas e pagamentos.</p>
-        </div>
+      <div className="sticky top-16 z-20 -mx-4 border-b border-black/10 bg-background/70 py-3 backdrop-blur dark:border-white/10 sm:-mx-6">
+        <div className="flex flex-col gap-2 px-4 sm:flex-row sm:items-end sm:justify-between sm:px-6">
+          <div>
+            <h1 className="text-xl font-semibold">Lançamentos</h1>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">Previsões do mês, faturas e pagamentos.</p>
+          </div>
 
-        <div className="flex items-end gap-3">
-          <label className="grid gap-1">
-            <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Mês</span>
-            <input
-              type="month"
-              value={month}
-              onChange={(e) => {
-                const next = e.target.value;
-                router.replace(`/lancamentos?month=${next}`);
-              }}
-              className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-            />
-          </label>
+          <div className="flex items-end gap-3">
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Mês</span>
+              <input
+                type="month"
+                value={month}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  router.replace(`/lancamentos?month=${next}`);
+                }}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+              />
+            </label>
 
-          <button
-            type="button"
-            onClick={() => setNewChargeModal({ open: true })}
-            className="h-10 rounded-lg bg-black/5 px-4 text-sm font-medium text-zinc-700 hover:bg-black/10 dark:bg-white/10 dark:text-zinc-200 dark:hover:bg-white/20"
-          >
-            Novo lançamento
-          </button>
+            <button
+              type="button"
+              onClick={() => setNewChargeModal({ open: true })}
+              className="h-10 rounded-lg bg-black/5 px-4 text-sm font-medium text-zinc-700 hover:bg-black/10 dark:bg-white/10 dark:text-zinc-200 dark:hover:bg-white/20"
+            >
+              + Conta
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setNewIncomeEntryModal({ open: true })}
-            className="h-10 rounded-lg bg-black/5 px-4 text-sm font-medium text-zinc-700 hover:bg-black/10 dark:bg-white/10 dark:text-zinc-200 dark:hover:bg-white/20"
-          >
-            Nova entrada
-          </button>
+            <button
+              type="button"
+              onClick={() => setNewIncomeEntryModal({ open: true })}
+              className="h-10 rounded-lg bg-black/5 px-4 text-sm font-medium text-zinc-700 hover:bg-black/10 dark:bg-white/10 dark:text-zinc-200 dark:hover:bg-white/20"
+            >
+              + Entrada
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setTransferModal({ open: true })}
-            className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90"
-          >
-            Transferir
-          </button>
+            <button
+              type="button"
+              onClick={() => setTransferModal({ open: true })}
+              className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90"
+            >
+              + Transferência
+            </button>
+          </div>
         </div>
       </div>
 
       <div className="rounded-xl border border-black/10 bg-black/5 p-4 dark:border-white/10 dark:bg-white/10">
-        <div className="text-sm font-medium">Dentro do previsto: {formatSignedCents(monthSummary.plannedNetCents)}</div>
+        <div className="flex flex-col gap-1">
+          <div className="text-sm font-medium">Dentro do previsto: {formatSignedCents(monthSummary.plannedNetCents)}</div>
+          <div className="text-sm font-medium">Saldo confirmado: {formatSignedCents(monthSummary.confirmedNetCents)}</div>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -806,9 +828,10 @@ export function LancamentosClient({
                                     open: true,
                                     manualChargeId: it.manualChargeId,
                                     description: it.label,
+                                    observation: null,
                                     amountCents: it.amountCents,
                                     dueDay: it.dueDay,
-                                      occurredAt: null,
+                                    occurredAt: null,
                                     isCard: false,
                                   })
                                 }
@@ -847,6 +870,9 @@ export function LancamentosClient({
                             {it.kind === "forecast" ? (
                               <form
                                 action={async () => {
+                                  const okConfirm = window.confirm("Remover esta conta do mês? (Ela deixa de aparecer neste mês)");
+                                  if (!okConfirm) return;
+
                                   await runAction(
                                     skipForecastForMonth,
                                     (() => {
@@ -870,6 +896,9 @@ export function LancamentosClient({
                             {it.kind === "manual" ? (
                               <form
                                 action={async (fd) => {
+                                  const okConfirm = window.confirm("Remover este lançamento do mês? (Ele será apagado)");
+                                  if (!okConfirm) return;
+
                                   fd.set("id", it.manualChargeId);
                                   await runAction(deleteManualCharge, fd);
                                 }}
@@ -1052,6 +1081,12 @@ export function LancamentosClient({
               if (!creditCardId) return;
 
               if (moveToCardModal.item.kind === "forecast") {
+                const occurredAt = String(fd.get("occurredAt") ?? "").trim();
+                if (!occurredAt) return;
+
+                const amount = String(fd.get("amount") ?? "").trim();
+                if (!amount) return;
+
                 const assignOk = await runAction(
                   assignForecastToCard,
                   (() => {
@@ -1065,32 +1100,26 @@ export function LancamentosClient({
 
                 if (!assignOk) return;
 
-                const confirmOk = await runAction(
-                  confirmCardForecastAmount,
-                  (() => {
-                    const x = new FormData();
-                    x.set("forecastId", moveToCardModal.item.forecastId);
-                    x.set("month", month);
-                    x.set("amount", String(fd.get("amount") ?? ""));
-                    x.set("confirmedAt", String(fd.get("confirmedAt") ?? ""));
-                    return x;
-                  })(),
-                );
-
-                if (confirmOk) setMoveToCardModal({ open: false });
+                const conf = new FormData();
+                conf.set("forecastId", moveToCardModal.item.forecastId);
+                conf.set("month", month);
+                conf.set("amount", amount);
+                conf.set("confirmedAt", occurredAt);
+                const ok = await runAction(confirmCardForecastAmount, conf);
+                if (ok) setMoveToCardModal({ open: false });
                 return;
               }
 
-              const ok = await runAction(
-                assignManualChargeToCard,
-                (() => {
-                  const x = new FormData();
-                  x.set("manualChargeId", moveToCardModal.item.manualChargeId);
-                  x.set("month", month);
-                  x.set("creditCardId", creditCardId);
-                  return x;
-                })(),
-              );
+              const occurredAt = String(fd.get("occurredAt") ?? "");
+              if (!occurredAt) return;
+
+              const x = new FormData();
+              x.set("manualChargeId", moveToCardModal.item.manualChargeId);
+              x.set("month", month);
+              x.set("creditCardId", creditCardId);
+              x.set("occurredAt", occurredAt);
+
+              const ok = await runAction(assignManualChargeToCard, x);
 
               if (ok) setMoveToCardModal({ open: false });
             }}
@@ -1102,6 +1131,19 @@ export function LancamentosClient({
                 <span className="font-medium">{formatCents(moveToCardModal.item.amountCents)}</span>
               </div>
             </div>
+
+            {moveToCardModal.item.kind === "forecast" ? (
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+                <input
+                  name="amount"
+                  inputMode="decimal"
+                  defaultValue={(moveToCardModal.item.amountCents / 100).toFixed(2).replace(".", ",")}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+            ) : null}
 
             <label className="grid gap-1">
               <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Cartão</span>
@@ -1119,31 +1161,31 @@ export function LancamentosClient({
               </select>
             </label>
 
-            {moveToCardModal.item.kind === "forecast" ? (
-              <div className="grid gap-3 rounded-xl border border-black/10 bg-black/5 p-3 text-sm dark:border-white/10 dark:bg-white/10">
-                <label className="grid gap-1">
-                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor confirmado</span>
-                  <input
-                    name="amount"
-                    inputMode="decimal"
-                    defaultValue={(moveToCardModal.item.amountCents / 100).toFixed(2).replace(".", ",")}
-                    className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                    required
-                  />
-                </label>
+            {moveToCardModal.item.kind === "manual" ? (
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                <input
+                  type="date"
+                  name="occurredAt"
+                  defaultValue={isoDateInSelectedMonth(month, moveToCardModal.item.dueDay)}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+            ) : (
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                <input
+                  type="date"
+                  name="occurredAt"
+                  defaultValue={isoDateInSelectedMonth(month, moveToCardModal.item.dueDay)}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+            )}
 
-                <label className="grid gap-1">
-                  <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
-                  <input
-                    type="date"
-                    name="confirmedAt"
-                    defaultValue={isoDateInSelectedMonth(month, moveToCardModal.item.dueDay)}
-                    className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                    required
-                  />
-                </label>
-              </div>
-            ) : null}
+
 
             <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
               Confirmar
@@ -1263,12 +1305,12 @@ export function LancamentosClient({
                 }
 
                 const creditCardId = String(fd.get("creditCardId") ?? "");
-                const confirmedAt = String(fd.get("confirmedAt") ?? "");
+                const occurredAt = String(fd.get("occurredAt") ?? "").trim();
                 if (!creditCardId) {
                   window.alert("Selecione o cartão.");
                   return;
                 }
-                if (!confirmedAt) {
+                if (!occurredAt) {
                   window.alert("Preencha a data.");
                   return;
                 }
@@ -1284,7 +1326,7 @@ export function LancamentosClient({
                 conf.set("forecastId", forecastId);
                 conf.set("month", month);
                 conf.set("amount", String(fd.get("amount") ?? ""));
-                conf.set("confirmedAt", confirmedAt);
+                conf.set("confirmedAt", occurredAt);
                 const ok = await runAction(confirmCardForecastAmount, conf);
                 if (ok) setNewChargeModal({ open: false });
                 return;
@@ -1295,6 +1337,9 @@ export function LancamentosClient({
               x.set("month", month);
               x.set("utilityAccountId", utilityAccountId);
               x.set("amount", String(fd.get("amount") ?? ""));
+
+              const observation = String(fd.get("observation") ?? "").trim();
+              if (observation.length) x.set("observation", observation);
 
               if (paymentKind === "bank") {
                 x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
@@ -1439,20 +1484,7 @@ export function LancamentosClient({
               </div>
             ) : null}
 
-            {newChargePaymentKind === "card" && hasUsableForecastForSelected ? (
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data de confirmação</span>
-                <input
-                  type="date"
-                  name="confirmedAt"
-                  defaultValue={isoDateInSelectedMonth(month, null)}
-                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                  required
-                />
-              </label>
-            ) : null}
-
-            {newChargePaymentKind === "card" && !hasUsableForecastForSelected ? (
+            {newChargePaymentKind === "card" ? (
               <label className="grid gap-1">
                 <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
                 <input
@@ -1461,6 +1493,16 @@ export function LancamentosClient({
                   defaultValue={isoDateInSelectedMonth(month, null)}
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
+                />
+              </label>
+            ) : null}
+
+            {newChargePaymentKind === "card" && !(bestForecastForUtility.get(newChargeUtilityAccountId)?.usable ?? null) ? (
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Observação (opcional)</span>
+                <input
+                  name="observation"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                 />
               </label>
             ) : null}
@@ -1564,13 +1606,13 @@ export function LancamentosClient({
               <div className="text-sm text-zinc-600 dark:text-zinc-400">Nenhuma conta na fatura deste mês.</div>
             ) : (
               <div className="overflow-hidden rounded-xl border border-black/10 dark:border-white/10">
-                <table className="w-full text-sm">
+                <table className="w-full table-fixed text-sm">
                   <thead className="bg-black/5 text-left text-xs font-semibold text-zinc-700 dark:bg-white/10 dark:text-zinc-200">
                     <tr>
                       <th className="px-3 py-2">Conta</th>
-                      <th className="px-3 py-2">Venc.</th>
-                      <th className="px-3 py-2">Valor</th>
-                      <th className="px-3 py-2"></th>
+                      <th className="px-3 py-2 w-16">Venc.</th>
+                      <th className="px-3 py-2 w-28">Valor</th>
+                      <th className="px-3 py-2 w-44"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1584,15 +1626,28 @@ export function LancamentosClient({
                             : "border-t border-black/10 dark:border-white/10"
                         }
                       >
-                        <td className="px-3 py-2">{it.label}</td>
-                        <td className="px-3 py-2">
-                          {it.kind === "manual" && it.occurredAt
-                            ? dayMonthFromIsoDateString(it.occurredAt) ?? "-"
-                            : it.dueDay
-                              ? String(it.dueDay)
-                              : "-"}
+                        <td className="px-3 py-1.5 wrap-break-word">
+                          <div className="flex flex-col">
+                            <span className="font-medium">{it.label}</span>
+                            {it.kind === "manual" && it.observation ? (
+                              <span className="text-xs text-zinc-600 dark:text-zinc-400">{it.observation}</span>
+                            ) : null}
+                          </div>
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-1.5">
+                          {it.kind === "forecast"
+                            ? it.confirmedAt
+                              ? dayMonthFromIsoDateString(it.confirmedAt) ?? "-"
+                              : it.dueDay
+                                ? String(it.dueDay)
+                                : "-"
+                            : it.occurredAt
+                              ? dayMonthFromIsoDateString(it.occurredAt) ?? "-"
+                              : it.dueDay
+                                ? String(it.dueDay)
+                                : "-"}
+                        </td>
+                        <td className="px-3 py-1.5">
                           <div className="flex flex-col">
                             <span className="font-medium">{formatCents(it.amountCents)}</span>
                             {it.kind === "forecast" && it.confirmedAmountCents !== null ? (
@@ -1602,49 +1657,49 @@ export function LancamentosClient({
                             ) : null}
                           </div>
                         </td>
-                        <td className="px-3 py-2">
-                          <div className="flex justify-end gap-2">
+                        <td className="px-3 py-1.5">
+                          <div className="flex items-center justify-end gap-1">
                             {it.kind === "forecast" ? (
+                              it.confirmedAmountCents === null ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setConfirmCardItemModal({
+                                      open: true,
+                                      forecastId: it.forecastId,
+                                      label: it.label,
+                                      amountCents: it.amountCents,
+                                      originalAmountCents: it.originalAmountCents,
+                                      dueDay: it.dueDay,
+                                      confirmedAmountCents: it.confirmedAmountCents,
+                                      confirmedAt: it.confirmedAt,
+                                    })
+                                  }
+                                  className="h-7 rounded-md px-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                >
+                                  Editar
+                                </button>
+                              ) : null
+                            ) : it.confirmedAt ? null : (
                               <button
                                 type="button"
                                 onClick={() =>
-                                  setConfirmCardItemModal({
-                                    open: true,
-                                    forecastId: it.forecastId,
-                                    label: it.label,
-                                    amountCents: it.amountCents,
-                                    originalAmountCents: it.originalAmountCents,
-                                    dueDay: it.dueDay,
-                                    confirmedAmountCents: it.confirmedAmountCents,
-                                    confirmedAt: it.confirmedAt,
-                                  })
-                                }
-                                className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
-                              >
-                                {it.confirmedAmountCents !== null ? "Editar confirmação" : "Confirmar valor"}
-                              </button>
-                            ) : null}
-
-                            {it.kind === "manual" ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setConfirmCardManualModal({
+                                  setEditManualChargeModal({
                                     open: true,
                                     manualChargeId: it.manualChargeId,
-                                    label: it.label,
+                                    description: it.label,
+                                    observation: it.observation,
                                     amountCents: it.amountCents,
-                                    originalAmountCents: it.originalAmountCents,
                                     dueDay: it.dueDay,
-                                    confirmedAmountCents: it.confirmedAmountCents ?? null,
-                                    confirmedAt: it.confirmedAt ?? null,
+                                    occurredAt: it.occurredAt ?? null,
+                                    isCard: true,
                                   })
                                 }
-                                className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                className="h-7 rounded-md px-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
                               >
-                                {it.confirmedAmountCents ? "Editar confirmação" : "Confirmar valor"}
+                                Editar
                               </button>
-                            ) : null}
+                            )}
 
                             {it.kind === "forecast" && it.confirmedAmountCents !== null ? (
                               <form
@@ -1658,61 +1713,83 @@ export function LancamentosClient({
                                       return x;
                                     })(),
                                   );
-                                  if (ok) {
-                                    setManageCardModal((cur) => {
-                                      if (!cur.open) return cur;
-                                      return {
-                                        ...cur,
-                                        items: cur.items.map((x) =>
-                                          x.kind === "forecast" && x.forecastId === it.forecastId
-                                            ? {
-                                                ...x,
-                                                amountCents: x.originalAmountCents,
-                                                confirmedAmountCents: null,
-                                                confirmedAt: null,
-                                              }
-                                            : x,
-                                        ),
-                                      };
-                                    });
-                                  }
+                                  if (!ok) return;
+
+                                  setManageCardModal((cur) => {
+                                    if (!cur.open) return cur;
+                                    return {
+                                      ...cur,
+                                      items: cur.items.map((x) =>
+                                        x.kind === "forecast" && x.forecastId === it.forecastId
+                                          ? {
+                                              ...x,
+                                              amountCents: x.originalAmountCents,
+                                              confirmedAmountCents: null,
+                                              confirmedAt: null,
+                                            }
+                                          : x,
+                                      ),
+                                    };
+                                  });
                                 }}
                               >
                                 <button
                                   type="submit"
-                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                  aria-label="Desfazer confirmação"
+                                  title="Desfazer confirmação"
+                                  className="grid h-7 w-7 place-items-center rounded-md text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
                                 >
-                                  Desfazer confirmação
+                                  ↺
                                 </button>
                               </form>
-                            ) : null}
-
-                            {it.kind === "forecast" ? (
+                            ) : it.kind === "manual" && it.confirmedAt ? (
                               <form
                                 action={async () => {
                                   const ok = await runAction(
-                                    skipForecastForMonth,
+                                    unconfirmCardManualCharge,
                                     (() => {
                                       const x = new FormData();
-                                      x.set("forecastId", it.forecastId);
+                                      x.set("manualChargeId", it.manualChargeId);
                                       x.set("month", month);
                                       return x;
                                     })(),
                                   );
-                                  if (ok) setManageCardModal({ open: false });
+                                  if (!ok) return;
+
+                                  setManageCardModal((cur) => {
+                                    if (!cur.open) return cur;
+                                    return {
+                                      ...cur,
+                                      items: cur.items.map((x) =>
+                                        x.kind === "manual" && x.manualChargeId === it.manualChargeId
+                                          ? {
+                                              ...x,
+                                              amountCents: x.originalAmountCents,
+                                              confirmedAmountCents: null,
+                                              confirmedAt: null,
+                                            }
+                                          : x,
+                                      ),
+                                    };
+                                  });
                                 }}
                               >
                                 <button
                                   type="submit"
-                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                  aria-label="Desfazer confirmação"
+                                  title="Desfazer confirmação"
+                                  className="grid h-7 w-7 place-items-center rounded-md text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
                                 >
-                                  Remover do mês
+                                  ↺
                                 </button>
                               </form>
                             ) : null}
 
                             <form
                               action={async () => {
+                                const okConfirm = window.confirm("Voltar esta conta pra lista? (Remover do cartão)");
+                                if (!okConfirm) return;
+
                                 const ok =
                                   it.kind === "forecast"
                                     ? await runAction(
@@ -1747,15 +1824,47 @@ export function LancamentosClient({
                             >
                               <button
                                 type="submit"
-                                className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                aria-label="Voltar pra lista"
+                                title="Voltar pra lista"
+                                className="grid h-7 w-7 place-items-center rounded-md text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
                               >
-                                Voltar pra lista
+                                ↩
                               </button>
                             </form>
 
-                            {it.kind === "manual" ? (
+                            {it.kind === "forecast" ? (
                               <form
                                 action={async () => {
+                                  const okConfirm = window.confirm("Remover esta conta do mês? (Ela deixa de aparecer neste mês)");
+                                  if (!okConfirm) return;
+
+                                  const ok = await runAction(
+                                    skipForecastForMonth,
+                                    (() => {
+                                      const x = new FormData();
+                                      x.set("forecastId", it.forecastId);
+                                      x.set("month", month);
+                                      return x;
+                                    })(),
+                                  );
+                                  if (ok) setManageCardModal({ open: false });
+                                }}
+                              >
+                                <button
+                                  type="submit"
+                                  aria-label="Remover do mês"
+                                  title="Remover do mês"
+                                  className="grid h-7 w-7 place-items-center rounded-md text-xs font-medium text-rose-700 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15"
+                                >
+                                  ✕
+                                </button>
+                              </form>
+                            ) : (
+                              <form
+                                action={async () => {
+                                  const okConfirm = window.confirm("Remover este lançamento do mês? (Ele será apagado)");
+                                  if (!okConfirm) return;
+
                                   await runAction(
                                     deleteManualCharge,
                                     (() => {
@@ -1774,12 +1883,14 @@ export function LancamentosClient({
                               >
                                 <button
                                   type="submit"
-                                  className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                                  aria-label="Remover do mês"
+                                  title="Remover do mês"
+                                  className="grid h-7 w-7 place-items-center rounded-md text-xs font-medium text-rose-700 hover:bg-rose-500/10 dark:text-rose-300 dark:hover:bg-rose-500/15"
                                 >
-                                  Remover do mês
+                                  ✕
                                 </button>
                               </form>
-                            ) : null}
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1809,6 +1920,9 @@ export function LancamentosClient({
               }
               x.set("utilityAccountId", utilityAccountId);
 
+              const observation = String(fd.get("observation") ?? "").trim();
+              if (observation.length) x.set("observation", observation);
+
               const amountRaw = String(fd.get("amount") ?? "");
               x.set("amount", amountRaw);
 
@@ -1828,7 +1942,6 @@ export function LancamentosClient({
               const ok = await runAction(createManualCharge, x);
               if (ok) {
                 setAddCardChargeModal({ open: false });
-                setManageCardModal({ open: false });
               } else {
                 window.alert("Não foi possível adicionar. Verifique valor e data.");
               }
@@ -1870,6 +1983,14 @@ export function LancamentosClient({
               </label>
             </div>
 
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Observação (opcional)</span>
+              <input
+                name="observation"
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+              />
+            </label>
+
             <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
               Adicionar
             </button>
@@ -1878,13 +1999,16 @@ export function LancamentosClient({
       )}
 
       {editManualChargeModal.open && (
-        <ModalShell title="Editar lançamento" onClose={() => setEditManualChargeModal({ open: false })}>
+        <ModalShell title={`Editar — ${editManualChargeModal.description}`} onClose={() => setEditManualChargeModal({ open: false })}>
           <form
             action={async (fd) => {
               const x = new FormData();
               x.set("manualChargeId", editManualChargeModal.manualChargeId);
-              x.set("description", String(fd.get("description") ?? ""));
               x.set("amount", String(fd.get("amount") ?? ""));
+
+              const observation = String(fd.get("observation") ?? "").trim();
+              if (observation.length) x.set("observation", observation);
+              else x.set("observation", "");
 
               const occurredAtRaw = String(fd.get("occurredAt") ?? "").trim();
               if (occurredAtRaw.length) x.set("occurredAt", occurredAtRaw);
@@ -1907,17 +2031,6 @@ export function LancamentosClient({
                 defaultValue={editManualChargeModal.occurredAt ?? ""}
                 className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                 required={editManualChargeModal.isCard}
-              />
-            </label>
-
-            <label className="grid gap-1">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Descrição</span>
-              <input
-                name="description"
-                defaultValue={editManualChargeModal.description}
-                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                required
-                data-autofocus
               />
             </label>
 
@@ -1946,6 +2059,15 @@ export function LancamentosClient({
                 />
               </label>
             </div>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Observação (opcional)</span>
+              <input
+                name="observation"
+                defaultValue={editManualChargeModal.observation ?? ""}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+              />
+            </label>
 
             <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
               Salvar
@@ -2149,115 +2271,7 @@ export function LancamentosClient({
         </ModalShell>
       )}
 
-      {confirmCardManualModal.open && (
-        <ModalShell title={`Confirmar valor — ${confirmCardManualModal.label}`} onClose={() => setConfirmCardManualModal({ open: false })}>
-          <form
-            action={async (fd) => {
-              const amountRaw = String(fd.get("amount") ?? "");
-              const confirmedAt = String(fd.get("confirmedAt") ?? "");
-              const amountCents = parseMoneyToCents(amountRaw);
-              if (amountCents === null) return;
 
-              const x = new FormData();
-              x.set("manualChargeId", confirmCardManualModal.manualChargeId);
-              x.set("month", month);
-              x.set("amount", amountRaw);
-              x.set("confirmedAt", confirmedAt);
-              const ok = await runAction(confirmCardManualCharge, x);
-              if (!ok) return;
-
-              setManageCardModal((cur) => {
-                if (!cur.open) return cur;
-                return {
-                  ...cur,
-                  items: cur.items.map((it) =>
-                    it.kind === "manual" && it.manualChargeId === confirmCardManualModal.manualChargeId
-                      ? {
-                          ...it,
-                          amountCents,
-                          confirmedAmountCents: amountCents,
-                          confirmedAt,
-                          occurredAt: confirmedAt,
-                          dueDay: dayFromIsoDate(confirmedAt) ?? it.dueDay,
-                        }
-                      : it,
-                  ),
-                };
-              });
-
-              setConfirmCardManualModal({ open: false });
-            }}
-            className="grid gap-3"
-          >
-            <label className="grid gap-1">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
-              <input
-                name="amount"
-                inputMode="decimal"
-                defaultValue={(((confirmCardManualModal.confirmedAmountCents ?? confirmCardManualModal.amountCents) as number) / 100)
-                  .toFixed(2)
-                  .replace(".", ",")}
-                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                required
-              />
-            </label>
-
-            <label className="grid gap-1">
-              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
-              <input
-                type="date"
-                name="confirmedAt"
-                defaultValue={confirmCardManualModal.confirmedAt ?? isoDateInSelectedMonth(month, confirmCardManualModal.dueDay)}
-                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
-                required
-              />
-            </label>
-
-            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
-              Confirmar
-            </button>
-
-            {confirmCardManualModal.confirmedAmountCents !== null ? (
-              <button
-                type="button"
-                onClick={async () => {
-                  const ok = await runAction(
-                    unconfirmCardManualCharge,
-                    (() => {
-                      const x = new FormData();
-                      x.set("manualChargeId", confirmCardManualModal.manualChargeId);
-                      x.set("month", month);
-                      return x;
-                    })(),
-                  );
-                  if (!ok) return;
-
-                  setManageCardModal((cur) => {
-                    if (!cur.open) return cur;
-                    return {
-                      ...cur,
-                      items: cur.items.map((it) =>
-                        it.kind === "manual" && it.manualChargeId === confirmCardManualModal.manualChargeId
-                          ? {
-                              ...it,
-                              confirmedAmountCents: null,
-                              confirmedAt: null,
-                            }
-                          : it,
-                      ),
-                    };
-                  });
-
-                  setConfirmCardManualModal({ open: false });
-                }}
-                className="h-10 rounded-lg px-4 text-sm font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
-              >
-                Desfazer confirmação
-              </button>
-            ) : null}
-          </form>
-        </ModalShell>
-      )}
 
       {payInvoiceModal.open && (
         <ModalShell title={`Pagar fatura — ${payInvoiceModal.creditCardName}`} onClose={() => setPayInvoiceModal({ open: false })}>
@@ -2408,6 +2422,29 @@ export function LancamentosClient({
         <ModalShell title="Transferir entre contas" onClose={() => setTransferModal({ open: false })}>
           <form
             action={async (fd) => {
+              const fromBankAccountId = String(fd.get("fromBankAccountId") ?? "");
+              const toBankAccountId = String(fd.get("toBankAccountId") ?? "");
+              const transferAt = String(fd.get("transferAt") ?? "").trim();
+              const amountRaw = String(fd.get("amount") ?? "");
+              const amountCents = parseMoneyToCents(amountRaw);
+
+              if (fromBankAccountId && toBankAccountId && transferAt && amountCents !== null) {
+                const duplicate = movementLog.some(
+                  (m) =>
+                    m.date === transferAt &&
+                    m.fromBankAccountId === fromBankAccountId &&
+                    m.toBankAccountId === toBankAccountId &&
+                    m.amountCents === amountCents,
+                );
+
+                if (duplicate) {
+                  const okConfirm = window.confirm(
+                    "Já existe uma transferência igual (mesma data, origem, destino e valor). Quer lançar mesmo assim?",
+                  );
+                  if (!okConfirm) return;
+                }
+              }
+
               const ok = await runAction(createBankTransfer, fd);
               if (ok) setTransferModal({ open: false });
             }}

@@ -116,7 +116,15 @@ export default async function DashboardPage() {
       prisma.manualCharge.findMany({
         where: { month: monthStart },
         orderBy: [{ dueDay: "asc" }, { description: "asc" }],
-        select: { id: true, description: true, amountCents: true, creditCardId: true, paidAt: true, paidAmountCents: true },
+        select: {
+          id: true,
+          description: true,
+          amountCents: true,
+          creditCardId: true,
+          paidAt: true,
+          paidAmountCents: true,
+          utilityAccount: { select: { name: true } },
+        },
       }),
       prisma.creditCard.findMany({
         where: { status: "ACTIVE" },
@@ -170,7 +178,7 @@ export default async function DashboardPage() {
   const unpaidManualDirect: UnpaidItem[] = manualCharges
     .filter((c) => !c.creditCardId)
     .filter((c) => !c.paidAt)
-    .map((c) => ({ kind: "manual" as const, label: c.description, amountCents: c.amountCents }));
+    .map((c) => ({ kind: "manual" as const, label: c.utilityAccount?.name ?? c.description, amountCents: c.amountCents }));
 
   const unpaidCardInvoices: UnpaidItem[] = creditCards
     .filter((c) => !paidInvoiceCardIds.has(c.id))

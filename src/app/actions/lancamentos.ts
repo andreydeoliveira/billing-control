@@ -293,18 +293,7 @@ export async function payCreditCardInvoice(formData: FormData): Promise<boolean>
     if (hasUnconfirmed) return false;
   }
 
-  // Enforce confirmation for manual charges on the card invoice (only when charge has occurredAt).
-  const unconfirmedManualOnCard = await prisma.manualCharge.findFirst({
-    where: {
-      creditCardId: parsed.data.creditCardId,
-      month,
-      occurredAt: { not: null },
-      OR: [{ cardConfirmedAmountCents: null }, { cardConfirmedAt: null }],
-    },
-    select: { id: true },
-  });
-
-  if (unconfirmedManualOnCard) return false;
+  // Manual card charges are explicit; no extra confirmation gate here.
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -322,86 +311,6 @@ export async function payCreditCardInvoice(formData: FormData): Promise<boolean>
         where: { id: parsed.data.bankAccountId },
         data: { balanceCents: { decrement: amountCents } },
       });
-    });
-  } catch {
-    return false;
-  }
-
-  revalidatePath("/lancamentos");
-  return true;
-}
-
-export async function confirmCardManualCharge(formData: FormData): Promise<boolean> {
-  const parsed = z
-    .object({ manualChargeId: IdSchema, month: z.string().min(1), amount: z.any(), confirmedAt: z.string().min(1) })
-    .safeParse({
-      manualChargeId: formData.get("manualChargeId"),
-      month: formData.get("month"),
-      amount: formData.get("amount"),
-      confirmedAt: formData.get("confirmedAt"),
-    });
-
-  if (!parsed.success) return false;
-  const month = parseOptionalYearMonth(parsed.data.month);
-  const confirmedAt = parseOptionalDate(parsed.data.confirmedAt);
-  const amountCents = parseMoneyToCents(parsed.data.amount);
-  if (!month || !confirmedAt || amountCents === null) return false;
-  if (amountCents <= 0) return false;
-
-  try {
-    await prisma.$transaction(async (tx) => {
-      const existing = await tx.manualCharge.findUnique({
-        where: { id: parsed.data.manualChargeId },
-        select: { id: true, month: true, creditCardId: true, paidAt: true },
-      });
-      if (!existing) throw new Error("not_found");
-      if (!existing.creditCardId) throw new Error("not_card");
-      if (existing.paidAt) throw new Error("paid_direct");
-      if (existing.month.getTime() !== month.getTime()) throw new Error("wrong_month");
-
-      await tx.manualCharge.update({
-        where: { id: existing.id },
-        data: {
-          amountCents,
-          occurredAt: confirmedAt,
-          dueDay: confirmedAt.getUTCDate(),
-          cardConfirmedAmountCents: amountCents,
-          cardConfirmedAt: confirmedAt,
-        },
-      });
-    });
-  } catch {
-    return false;
-  }
-
-  revalidatePath("/lancamentos");
-  return true;
-}
-
-export async function unconfirmCardManualCharge(formData: FormData): Promise<boolean> {
-  const parsed = z.object({ manualChargeId: IdSchema, month: z.string().min(1) }).safeParse({
-    manualChargeId: formData.get("manualChargeId"),
-    month: formData.get("month"),
-  });
-  if (!parsed.success) return false;
-  const month = parseOptionalYearMonth(parsed.data.month);
-  if (!month) return false;
-
-  try {
-    const existing = await prisma.manualCharge.findUnique({
-      where: { id: parsed.data.manualChargeId },
-      select: { id: true, month: true, creditCardId: true },
-    });
-    if (!existing) return false;
-    if (!existing.creditCardId) return false;
-    if (existing.month.getTime() !== month.getTime()) return false;
-
-    await prisma.manualCharge.update({
-      where: { id: existing.id },
-      data: {
-        cardConfirmedAmountCents: null,
-        cardConfirmedAt: null,
-      },
     });
   } catch {
     return false;
@@ -448,6 +357,39 @@ export async function confirmCardForecastAmount(formData: FormData): Promise<boo
       cardConfirmedAt: confirmedAt,
     },
   });
+
+  revalidatePath("/lancamentos");
+  return true;
+}
+
+export async function unconfirmCardManualCharge(formData: FormData): Promise<boolean> {
+  const parsed = z.object({ manualChargeId: IdSchema, month: z.string().min(1) }).safeParse({
+    manualChargeId: formData.get("manualChargeId"),
+    month: formData.get("month"),
+  });
+  if (!parsed.success) return false;
+  const month = parseOptionalYearMonth(parsed.data.month);
+  if (!month) return false;
+
+  try {
+    const existing = await prisma.manualCharge.findUnique({
+      where: { id: parsed.data.manualChargeId },
+      select: { id: true, month: true, creditCardId: true },
+    });
+    if (!existing) return false;
+    if (!existing.creditCardId) return false;
+    if (existing.month.getTime() !== month.getTime()) return false;
+
+    await prisma.manualCharge.update({
+      where: { id: existing.id },
+      data: {
+        cardConfirmedAmountCents: null,
+        cardConfirmedAt: null,
+      },
+    });
+  } catch {
+    return false;
+  }
 
   revalidatePath("/lancamentos");
   return true;
@@ -950,8 +892,8 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
   const parsed = z
     .object({
       month: z.string().min(1),
-      utilityAccountId: z.string().optional(),
-      description: z.string().trim().min(1).max(120).optional(),
+      utilityAccountId: IdSchema,
+      observation: z.string().trim().max(240).optional(),
       amount: z.any(),
       dueDay: z.string().optional(),
       occurredAt: z.string().optional(),
@@ -961,8 +903,8 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
     })
     .safeParse({
       month: formData.get("month"),
-      utilityAccountId: formData.get("utilityAccountId") ? String(formData.get("utilityAccountId")) : undefined,
-      description: formData.get("description") ? String(formData.get("description")) : undefined,
+      utilityAccountId: formData.get("utilityAccountId"),
+      observation: formData.get("observation") ? String(formData.get("observation")) : undefined,
       amount: formData.get("amount"),
       dueDay: formData.get("dueDay") ? String(formData.get("dueDay")) : undefined,
       occurredAt: formData.get("occurredAt") ? String(formData.get("occurredAt")) : undefined,
@@ -997,23 +939,15 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
   if ((bankAccountId && !paidAt) || (!bankAccountId && paidAt)) return false;
   if (creditCardId && (bankAccountId || paidAt)) return false;
 
-  const utilityAccountId = parsed.data.utilityAccountId?.trim();
-  const hasUtilityAccount = Boolean(utilityAccountId && utilityAccountId.length && utilityAccountId !== "__custom__");
+  const utilityAccount = await prisma.utilityAccount.findUnique({
+    where: { id: parsed.data.utilityAccountId },
+    select: { name: true, status: true },
+  });
+  if (!utilityAccount) return false;
+  if (utilityAccount.status !== "ACTIVE") return false;
 
-  const description = hasUtilityAccount
-    ? (await prisma.utilityAccount
-        .findUnique({
-          where: { id: utilityAccountId! },
-          select: { name: true, status: true },
-        })
-        .then((a) => {
-          if (!a) return null;
-          if (a.status !== "ACTIVE") return null;
-          return a.name;
-        }))
-    : (parsed.data.description?.trim() ?? null);
-
-  if (!description || !description.length) return false;
+  const description = utilityAccount.name;
+  const observation = (parsed.data.observation ?? "").trim() || null;
 
   if (bankAccountId && paidAt) {
     try {
@@ -1021,8 +955,9 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
         await tx.manualCharge.create({
           data: {
             month,
-            utilityAccountId: hasUtilityAccount ? utilityAccountId! : null,
+            utilityAccountId: parsed.data.utilityAccountId,
             description,
+            observation,
             amountCents,
             dueDay: derivedDueDay,
             occurredAt,
@@ -1047,14 +982,15 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
     await prisma.manualCharge.create({
       data: {
         month,
-        utilityAccountId: hasUtilityAccount ? utilityAccountId! : null,
+        utilityAccountId: parsed.data.utilityAccountId,
         description,
+        observation,
         amountCents,
         dueDay: derivedDueDay,
         occurredAt,
         creditCardId: creditCardId && creditCardId.length ? creditCardId : null,
-        cardConfirmedAmountCents: null,
-        cardConfirmedAt: null,
+        cardConfirmedAmountCents: creditCardId ? amountCents : null,
+        cardConfirmedAt: creditCardId ? occurredAt : null,
       },
     });
   }
@@ -1067,14 +1003,14 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
   const parsed = z
     .object({
       manualChargeId: IdSchema,
-      description: z.string().trim().min(1).max(120),
+      observation: z.string().trim().max(240).optional(),
       amount: z.any(),
       dueDay: z.string().optional(),
       occurredAt: z.string().optional(),
     })
     .safeParse({
       manualChargeId: formData.get("manualChargeId"),
-      description: formData.get("description"),
+      observation: formData.get("observation") ? String(formData.get("observation")) : undefined,
       amount: formData.get("amount"),
       dueDay: formData.get("dueDay") ? String(formData.get("dueDay")) : undefined,
       occurredAt: formData.get("occurredAt") ? String(formData.get("occurredAt")) : undefined,
@@ -1112,15 +1048,19 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
       const wasPaidDirect = Boolean(existing.paidAt && existing.bankAccountId);
       const oldPaidCents = wasPaidDirect ? (existing.paidAmountCents ?? existing.amountCents) : null;
 
+      if (existing.creditCardId && !occurredAt) throw new Error("missing_occurredAt");
+
       const derivedDueDay = existing.creditCardId && occurredAt ? occurredAt.getUTCDate() : dueDay;
 
       await tx.manualCharge.update({
         where: { id: existing.id },
         data: {
-          description: parsed.data.description,
+          observation: parsed.data.observation !== undefined ? (parsed.data.observation.trim() || null) : undefined,
           amountCents,
           dueDay: derivedDueDay,
           occurredAt,
+          cardConfirmedAmountCents: existing.creditCardId ? amountCents : undefined,
+          cardConfirmedAt: existing.creditCardId ? occurredAt : undefined,
           paidAmountCents: wasPaidDirect ? amountCents : undefined,
         },
       });
@@ -1166,21 +1106,47 @@ export async function assignManualChargeToCard(formData: FormData): Promise<bool
       manualChargeId: IdSchema,
       month: z.string().min(1),
       creditCardId: IdSchema,
+      occurredAt: z.string().min(1),
     })
     .safeParse({
       manualChargeId: formData.get("manualChargeId"),
       month: formData.get("month"),
       creditCardId: formData.get("creditCardId"),
+      occurredAt: formData.get("occurredAt"),
     });
 
   if (!parsed.success) return false;
   const month = parseOptionalYearMonth(parsed.data.month);
-  if (!month) return false;
+  const occurredAt = parseOptionalDate(parsed.data.occurredAt);
+  if (!month || !occurredAt) return false;
 
   try {
-    await prisma.manualCharge.update({
-      where: { id: parsed.data.manualChargeId },
-      data: { creditCardId: parsed.data.creditCardId },
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.manualCharge.findUnique({
+        where: { id: parsed.data.manualChargeId },
+        select: {
+          id: true,
+          month: true,
+          amountCents: true,
+          paidAt: true,
+          bankAccountId: true,
+        },
+      });
+
+      if (!existing) throw new Error("not_found");
+      if (existing.month.getTime() !== month.getTime()) throw new Error("wrong_month");
+      if (existing.paidAt || existing.bankAccountId) throw new Error("already_paid");
+
+      await tx.manualCharge.update({
+        where: { id: existing.id },
+        data: {
+          creditCardId: parsed.data.creditCardId,
+          occurredAt,
+          dueDay: occurredAt.getUTCDate(),
+          cardConfirmedAmountCents: existing.amountCents,
+          cardConfirmedAt: occurredAt,
+        },
+      });
     });
   } catch {
     return false;
@@ -1205,7 +1171,11 @@ export async function unassignManualChargeFromCard(formData: FormData): Promise<
   try {
     await prisma.manualCharge.update({
       where: { id: parsed.data.manualChargeId },
-      data: { creditCardId: null },
+      data: {
+        creditCardId: null,
+        cardConfirmedAmountCents: null,
+        cardConfirmedAt: null,
+      },
     });
   } catch {
     return false;
