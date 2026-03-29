@@ -56,6 +56,7 @@ type ForecastRow = {
   installmentsTotal: number | null;
   kind: ForecastKind;
   startsAt: string | null; // YYYY-MM-DD (for MONTHLY/ANNUAL it's stored as 1st day)
+  endsAt: string | null; // YYYY-MM-DD (for MONTHLY/ANNUAL it's stored as 1st day)
   oneTimeAt: string | null; // YYYY-MM-DD
   observation: string | null;
   status: Status;
@@ -72,6 +73,7 @@ type IncomeForecastRow = {
   installmentsTotal: number | null;
   kind: ForecastKind;
   startsAt: string | null;
+  endsAt: string | null;
   oneTimeAt: string | null;
   observation: string | null;
   status: Status;
@@ -165,6 +167,7 @@ function formatWhenLabel(row: {
   oneTimeAt: string | null;
   installmentsTotal: number | null;
   startsAt: string | null;
+  endsAt?: string | null;
   dueDay: number | null;
 }): string {
   if (row.kind === "ONE_TIME") return row.oneTimeAt ?? "—";
@@ -181,6 +184,8 @@ function formatWhenLabel(row: {
   const parts: string[] = [];
   const ym = toYearMonth(row.startsAt);
   if (ym) parts.push(`a partir de ${ym}`);
+  const endYm = toYearMonth(row.endsAt ?? null);
+  if (endYm) parts.push(`até ${endYm}`);
   if (row.dueDay) parts.push(`dia ${row.dueDay}`);
   return parts.length ? parts.join(" • ") : "—";
 }
@@ -316,6 +321,7 @@ type ModalState =
             installmentsTotal: number | null;
             kindValue: ForecastKind;
             startsAt: string | null;
+            endsAt: string | null;
             oneTimeAt: string | null;
             observation: string;
             status: Status;
@@ -330,6 +336,7 @@ type ModalState =
             installmentsTotal: number | null;
             kindValue: ForecastKind;
             startsAt: string | null;
+            endsAt: string | null;
             oneTimeAt: string | null;
             observation: string;
             status: Status;
@@ -499,6 +506,7 @@ export function CadastrosClient({
             installmentsTotal: 12,
             kindValue: "MONTHLY",
             startsAt: null,
+            endsAt: null,
             oneTimeAt: null,
             observation: "",
             status: "ACTIVE",
@@ -526,6 +534,7 @@ export function CadastrosClient({
           installmentsTotal: 12,
           kindValue: "MONTHLY",
           startsAt: null,
+          endsAt: null,
           oneTimeAt: null,
           observation: "",
           status: "ACTIVE",
@@ -550,6 +559,7 @@ export function CadastrosClient({
         installmentsTotal: 12,
         kindValue: "MONTHLY",
         startsAt: null,
+        endsAt: null,
         oneTimeAt: null,
         observation: "",
         status: "ACTIVE",
@@ -571,6 +581,7 @@ export function CadastrosClient({
         installmentsTotal: 12,
         kindValue: "MONTHLY",
         startsAt: null,
+        endsAt: null,
         oneTimeAt: null,
         observation: "",
         status: "ACTIVE",
@@ -619,6 +630,7 @@ export function CadastrosClient({
         installmentsTotal: row.installmentsTotal,
         kindValue: row.kind,
         startsAt: row.startsAt,
+        endsAt: row.endsAt,
         oneTimeAt: row.oneTimeAt,
         observation: row.observation ?? "",
         status: row.status,
@@ -640,6 +652,7 @@ export function CadastrosClient({
         installmentsTotal: row.installmentsTotal,
         kindValue: row.kind,
         startsAt: row.startsAt,
+        endsAt: row.endsAt,
         oneTimeAt: row.oneTimeAt,
         observation: row.observation ?? "",
         status: row.status,
@@ -966,7 +979,7 @@ export function CadastrosClient({
                         <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{f.bankAccountName ?? "—"}</td>
                         <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{formatMoneyBRLFromCents(f.amountCents)}</td>
                         <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{formatKindLabel(f.kind)}</td>
-                        <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{formatWhenLabel({ kind: f.kind, oneTimeAt: f.oneTimeAt, installmentsTotal: f.installmentsTotal, startsAt: f.startsAt, dueDay: f.dueDay })}</td>
+                        <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{formatWhenLabel({ kind: f.kind, oneTimeAt: f.oneTimeAt, installmentsTotal: f.installmentsTotal, startsAt: f.startsAt, endsAt: f.endsAt, dueDay: f.dueDay })}</td>
                         <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{f.observation ?? "—"}</td>
                         <td className="border-b border-black/5 py-3 pr-4 dark:border-white/5">
                           <StatusBadge status={f.status} />
@@ -1445,6 +1458,18 @@ function ForecastForm({
               className="h-11 w-full rounded-lg border border-black/10 bg-transparent px-3 text-sm outline-none focus:ring-2 focus:ring-black/15 dark:border-white/10 dark:focus:ring-white/15"
             />
           </label>
+
+          <label className="grid gap-1 col-span-2">
+            <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+              {kindValue === "MONTHLY" ? "Termina em (mês/ano) (opcional)" : "Última cobrança (mês/ano) (opcional)"}
+            </span>
+            <input
+              type="month"
+              name="endsAtMonth"
+              defaultValue={toYearMonth(initial.endsAt) || ""}
+              className="h-11 w-full rounded-lg border border-black/10 bg-transparent px-3 text-sm outline-none focus:ring-2 focus:ring-black/15 dark:border-white/10 dark:focus:ring-white/15"
+            />
+          </label>
         </div>
       ) : null}
 
@@ -1648,6 +1673,18 @@ function IncomeForecastForm({
               name="dueDay"
               required
               defaultValue={initial.dueDay ?? todayDay}
+              className="h-11 w-full rounded-lg border border-black/10 bg-transparent px-3 text-sm outline-none focus:ring-2 focus:ring-black/15 dark:border-white/10 dark:focus:ring-white/15"
+            />
+          </label>
+
+          <label className="grid gap-1 col-span-2">
+            <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+              {kindValue === "MONTHLY" ? "Termina em (mês/ano) (opcional)" : "Último recebimento (mês/ano) (opcional)"}
+            </span>
+            <input
+              type="month"
+              name="endsAtMonth"
+              defaultValue={toYearMonth(initial.endsAt) || ""}
               className="h-11 w-full rounded-lg border border-black/10 bg-transparent px-3 text-sm outline-none focus:ring-2 focus:ring-black/15 dark:border-white/10 dark:focus:ring-white/15"
             />
           </label>

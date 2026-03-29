@@ -48,6 +48,10 @@ function nextMonthStartUtc(monthStart: Date) {
   return new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1));
 }
 
+function toIsoYearMonthUtc(d: Date): string {
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}`;
+}
+
 type ForecastRow = Prisma.ForecastGetPayload<{ include: { utilityAccount: true } }>;
 type IncomeForecastRow = Prisma.IncomeForecastGetPayload<{ include: { incomeSource: true } }>;
 
@@ -55,6 +59,8 @@ function occursInMonth(forecast: ForecastRow, monthStart: Date): boolean {
   if (forecast.status !== "ACTIVE") return false;
   if (forecast.utilityAccount.status !== "ACTIVE") return false;
   if (forecast.amountCents <= 0) return false;
+
+  if (forecast.endsAt && monthsDiffUtc(monthStart, forecast.endsAt) > 0) return false;
 
   switch (forecast.kind) {
     case "ONE_TIME": {
@@ -86,6 +92,8 @@ function occursIncomeInMonth(forecast: IncomeForecastRow, monthStart: Date): boo
   if (forecast.status !== "ACTIVE") return false;
   if (forecast.incomeSource.status !== "ACTIVE") return false;
   if (forecast.amountCents <= 0) return false;
+
+  if (forecast.endsAt && monthsDiffUtc(monthStart, forecast.endsAt) > 0) return false;
 
   switch (forecast.kind) {
     case "ONE_TIME": {
@@ -129,13 +137,16 @@ export default async function LancamentosPage(props: {
     utilityAccounts,
     incomeSources,
     incomeForecasts,
-    incomeReceipts,
+    incomeReceiptsForPeriod,
+    incomeReceiptsReceivedInMonth,
     incomeEntries,
     forecasts,
     assignments,
     utilityPayments,
+    utilityPaymentsPaidInMonth,
     invoicePayments,
     manualCharges,
+    manualChargesPaidInMonth,
     transfers,
     monthOverrides,
   ] = await Promise.all([
@@ -179,6 +190,20 @@ export default async function LancamentosPage(props: {
           incomeSource: { select: { id: true, name: true } },
         },
       }),
+      prisma.incomeReceipt.findMany({
+        where: {
+          receivedAt: {
+            gte: monthStart,
+            lt: monthEnd,
+          },
+        },
+        include: {
+          bankAccount: { select: { id: true, name: true, bank: true } },
+          incomeSource: { select: { id: true, name: true } },
+          incomeForecast: { select: { id: true, amountCents: true, dueDay: true, observation: true } },
+        },
+        orderBy: [{ receivedAt: "asc" }, { createdAt: "asc" }],
+      }),
       prisma.transaction.findMany({
         where: {
           type: "INCOME",
@@ -217,6 +242,19 @@ export default async function LancamentosPage(props: {
           forecast: { include: { utilityAccount: { select: { name: true } } } },
         },
       }),
+      prisma.utilityPayment.findMany({
+        where: {
+          paidAt: {
+            gte: monthStart,
+            lt: monthEnd,
+          },
+        },
+        include: {
+          bankAccount: { select: { id: true, name: true } },
+          forecast: { include: { utilityAccount: { select: { name: true } } } },
+        },
+        orderBy: [{ paidAt: "asc" }, { createdAt: "asc" }],
+      }),
       prisma.creditCardInvoicePayment.findMany({
         where: { month: monthStart },
         include: {
@@ -232,6 +270,20 @@ export default async function LancamentosPage(props: {
           utilityAccount: { select: { id: true, name: true } },
         },
       }),
+      prisma.manualCharge.findMany({
+        where: {
+          creditCardId: null,
+          paidAt: {
+            gte: monthStart,
+            lt: monthEnd,
+          },
+        },
+        orderBy: [{ paidAt: "asc" }, { createdAt: "asc" }],
+        include: {
+          bankAccount: { select: { id: true, name: true } },
+          utilityAccount: { select: { id: true, name: true } },
+        },
+      }),
       prisma.bankTransfer.findMany({
         where: {
           transferAt: {
@@ -240,8 +292,8 @@ export default async function LancamentosPage(props: {
           },
         },
         include: {
-          fromBankAccount: { select: { id: true, name: true } },
-          toBankAccount: { select: { id: true, name: true } },
+          fromBankAccount: { select: { id: true, name: true, bank: true } },
+          toBankAccount: { select: { id: true, name: true, bank: true } },
         },
         orderBy: { transferAt: "desc" },
       }),
@@ -256,31 +308,59 @@ export default async function LancamentosPage(props: {
       }),
     ]);
 
-  const receiptByIncomeForecastId = new Map(incomeReceipts.map((r) => [r.incomeForecastId, r] as const));
+  const receiptByIncomeForecastIdForPeriod = new Map(
+    incomeReceiptsForPeriod.map((r) => [r.incomeForecastId, r] as const),
+  );
 
-  const incomeItems = incomeForecasts
+  const incomeOpenItems = incomeForecasts
     .filter((f) => occursIncomeInMonth(f, monthStart))
+    .filter((f) => !receiptByIncomeForecastIdForPeriod.has(f.id))
     .map((f) => {
-      const r = receiptByIncomeForecastId.get(f.id) ?? null;
-      const label = f.observation?.trim()
-        ? `${f.incomeSource.name} (${f.observation.trim()})`
-        : f.incomeSource.name;
+      const label = f.observation?.trim() ? `${f.incomeSource.name} (${f.observation.trim()})` : f.incomeSource.name;
 
       return {
+        rowKey: `income:open:${f.id}`,
         incomeForecastId: f.id,
         label,
         bankAccountId: f.bankAccountId ?? null,
         bankAccountName: f.bankAccount?.name ?? null,
         amountCents: f.amountCents,
         dueDay: f.dueDay ?? null,
-        received: Boolean(r),
-        receivedAmountCents: r?.amountCents ?? null,
-        receivedAt: r?.receivedAt ? r.receivedAt.toISOString().slice(0, 10) : null,
-        receivedBankAccountName: r?.bankAccount?.name ?? null,
-        receivedBankAccountBank: r?.bankAccount?.bank ?? null,
+        received: false as const,
+        receivedAmountCents: null,
+        receivedAt: null,
+        receivedBankAccountName: null,
+        receivedBankAccountBank: null,
+        receiptMonth: month,
       };
-    })
-    .sort((a, b) => a.label.localeCompare(b.label));
+    });
+
+  const incomeReceivedItems = incomeReceiptsReceivedInMonth.map((r) => {
+    const obs = r.incomeForecast?.observation?.trim() || "";
+    const label = obs ? `${r.incomeSource.name} (${obs})` : r.incomeSource.name;
+    return {
+      rowKey: `income:receipt:${r.id}`,
+      incomeForecastId: r.incomeForecastId,
+      label,
+      bankAccountId: r.bankAccountId,
+      bankAccountName: null,
+      amountCents: r.incomeForecast?.amountCents ?? r.amountCents,
+      dueDay: r.incomeForecast?.dueDay ?? null,
+      received: true as const,
+      receivedAmountCents: r.amountCents,
+      receivedAt: r.receivedAt.toISOString().slice(0, 10),
+      receivedBankAccountName: r.bankAccount?.name ?? null,
+      receivedBankAccountBank: r.bankAccount?.bank ?? null,
+      receiptMonth: toIsoYearMonthUtc(r.month),
+    };
+  });
+
+  const incomeItems = [...incomeOpenItems, ...incomeReceivedItems].sort((a, b) => {
+    const ad = a.received ? (a.receivedAt ? Number(a.receivedAt.slice(8, 10)) : 99) : a.dueDay ?? 99;
+    const bd = b.received ? (b.receivedAt ? Number(b.receivedAt.slice(8, 10)) : 99) : b.dueDay ?? 99;
+    if (ad !== bd) return ad - bd;
+    return a.label.localeCompare(b.label);
+  });
 
   const assignmentByForecastId = new Map(assignments.map((a) => [a.forecastId, a.creditCardId]));
   const paymentByForecastId = new Map(utilityPayments.map((p) => [p.forecastId, p] as const));
@@ -309,17 +389,21 @@ export default async function LancamentosPage(props: {
     };
     });
 
-  const manualDirect = manualCharges
+  const manualDirectOpen = manualCharges
     .filter((c) => !c.creditCardId)
+    .filter((c) => !c.paidAt)
     .map((c) => ({
+      rowKey: `manual:open:${c.id}`,
       kind: "manual" as const,
       manualChargeId: c.id,
       label: c.utilityAccount?.name ?? c.description,
+      observation: c.observation ?? null,
       amountCents: c.amountCents,
-      dueDay: c.dueDay ?? (c.paidAt ? c.paidAt.getUTCDate() : null),
-      paid: Boolean(c.paidAt),
-      paidAmountCents: c.paidAmountCents ?? null,
-      paidAt: c.paidAt ? c.paidAt.toISOString().slice(0, 10) : null,
+      dueDay: c.dueDay ?? (c.occurredAt ? c.occurredAt.getUTCDate() : null),
+      occurredAt: c.occurredAt ? c.occurredAt.toISOString().slice(0, 10) : null,
+      paid: false as const,
+      paidAmountCents: null,
+      paidAt: null,
     }));
 
   type ManualChargeRow = (typeof manualCharges)[number];
@@ -338,8 +422,10 @@ export default async function LancamentosPage(props: {
       date: string; // YYYY-MM-DD
       fromBankAccountId: string;
       fromBankAccountName: string;
+      fromBankAccountBank: string;
       toBankAccountId: string;
       toBankAccountName: string;
+      toBankAccountBank: string;
       amountCents: number;
       sortKey: number;
     }> = [];
@@ -353,8 +439,10 @@ export default async function LancamentosPage(props: {
         date,
         fromBankAccountId: t.fromBankAccount.id,
         fromBankAccountName: t.fromBankAccount.name,
+        fromBankAccountBank: t.fromBankAccount.bank,
         toBankAccountId: t.toBankAccount.id,
         toBankAccountName: t.toBankAccount.name,
+        toBankAccountBank: t.toBankAccount.bank,
         amountCents: t.amountCents,
         sortKey: d.getTime(),
       });
@@ -369,34 +457,70 @@ export default async function LancamentosPage(props: {
     date: m.date,
     fromBankAccountId: m.fromBankAccountId,
     fromBankAccountName: m.fromBankAccountName,
+    fromBankAccountBank: m.fromBankAccountBank,
     toBankAccountId: m.toBankAccountId,
     toBankAccountName: m.toBankAccountName,
+    toBankAccountBank: m.toBankAccountBank,
     amountCents: m.amountCents,
   }));
 
-  const directForecastItems = forecastOccurrences
+  const directForecastOpenItems = forecastOccurrences
     .filter((o) => !assignmentByForecastId.has(o.forecastId))
-    .map((o) => {
-      const p = paymentByForecastId.get(o.forecastId) ?? null;
-      return {
-        kind: "forecast" as const,
-        forecastId: o.forecastId,
-        label: o.utilityAccountName,
-        amountCents: o.amountCents,
-        dueDay: o.dueDay,
-        paid: Boolean(p),
-        paidAmountCents: p?.amountCents ?? null,
-        paidAt: p?.paidAt ? p.paidAt.toISOString().slice(0, 10) : null,
-      };
-    });
+    .filter((o) => !paymentByForecastId.has(o.forecastId))
+    .map((o) => ({
+      rowKey: `forecast:open:${o.forecastId}`,
+      kind: "forecast" as const,
+      forecastId: o.forecastId,
+      label: o.utilityAccountName,
+      amountCents: o.amountCents,
+      dueDay: o.dueDay,
+      paid: false as const,
+      paidAmountCents: null,
+      paidAt: null,
+      paymentMonth: null,
+    }));
 
-  const directItems = [...directForecastItems, ...manualDirect]
-    .sort((a, b) => {
+  const directForecastPaidItems = utilityPaymentsPaidInMonth.map((p) => {
+    const paidAtIso = p.paidAt.toISOString().slice(0, 10);
+    return {
+      rowKey: `forecast:paid:${p.id}`,
+      kind: "forecast" as const,
+      forecastId: p.forecastId,
+      label: p.forecast.utilityAccount.name,
+      amountCents: p.forecast.amountCents,
+      dueDay: p.paidAt.getUTCDate(),
+      paid: true as const,
+      paidAmountCents: p.amountCents,
+      paidAt: paidAtIso,
+      paymentMonth: toIsoYearMonthUtc(p.month),
+    };
+  });
+
+  const manualDirectPaidItems = manualChargesPaidInMonth.map((c) => {
+    const paidAtIso = c.paidAt ? c.paidAt.toISOString().slice(0, 10) : null;
+    return {
+      rowKey: `manual:paid:${c.id}`,
+      kind: "manual" as const,
+      manualChargeId: c.id,
+      label: c.utilityAccount?.name ?? c.description,
+      observation: c.observation ?? null,
+      amountCents: c.amountCents,
+      dueDay: c.paidAt ? c.paidAt.getUTCDate() : c.dueDay ?? null,
+      occurredAt: c.occurredAt ? c.occurredAt.toISOString().slice(0, 10) : null,
+      paid: true as const,
+      paidAmountCents: c.paidAmountCents ?? c.amountCents,
+      paidAt: paidAtIso,
+    };
+  });
+
+  const directItems = [...directForecastOpenItems, ...manualDirectOpen, ...directForecastPaidItems, ...manualDirectPaidItems].sort(
+    (a, b) => {
       const ad = a.dueDay ?? 99;
       const bd = b.dueDay ?? 99;
       if (ad !== bd) return ad - bd;
       return a.label.localeCompare(b.label);
-    });
+    },
+  );
 
   const forecastChoices = forecastOccurrences
     .map((o) => ({
@@ -470,18 +594,20 @@ export default async function LancamentosPage(props: {
     };
   });
 
-  const plannedIncomeCents = incomeItems.reduce((sum, it) => sum + it.amountCents, 0);
+  const plannedIncomeCents = incomeForecasts.filter((f) => occursIncomeInMonth(f, monthStart)).reduce((sum, f) => sum + f.amountCents, 0);
   const plannedExpenseCents =
-    directItems.reduce((sum, it) => sum + it.amountCents, 0) + cardGroups.reduce((sum, g) => sum + g.totalCents, 0);
+    forecastOccurrences
+      .filter((o) => !assignmentByForecastId.has(o.forecastId))
+      .reduce((sum, o) => sum + o.amountCents, 0) +
+    manualCharges.filter((c) => !c.creditCardId).reduce((sum, c) => sum + c.amountCents, 0) +
+    cardGroups.reduce((sum, g) => sum + g.totalCents, 0);
   const plannedNetCents = plannedIncomeCents - plannedExpenseCents;
 
-  const realizedIncomeCents = incomeReceipts.reduce((sum, r) => sum + r.amountCents, 0) + incomeEntries.reduce((sum, e) => sum + e.amountCents, 0);
+  const realizedIncomeCents = incomeReceiptsReceivedInMonth.reduce((sum, r) => sum + r.amountCents, 0) + incomeEntries.reduce((sum, e) => sum + e.amountCents, 0);
   const realizedExpenseCents =
-    utilityPayments.reduce((sum, p) => sum + p.amountCents, 0) +
+    utilityPaymentsPaidInMonth.reduce((sum, p) => sum + p.amountCents, 0) +
     invoicePayments.reduce((sum, p) => sum + p.amountCents, 0) +
-    manualCharges
-      .filter((c) => !c.creditCardId && c.paidAt)
-      .reduce((sum, c) => sum + (c.paidAmountCents ?? c.amountCents), 0);
+    manualChargesPaidInMonth.reduce((sum, c) => sum + (c.paidAmountCents ?? c.amountCents), 0);
   const realizedNetCents = realizedIncomeCents - realizedExpenseCents;
   const deltaNetCents = realizedNetCents - plannedNetCents;
 
@@ -496,10 +622,8 @@ export default async function LancamentosPage(props: {
   );
 
   const confirmedExpenseCents =
-    utilityPayments.reduce((sum, p) => sum + p.amountCents, 0) +
-    manualCharges
-      .filter((c) => !c.creditCardId && c.paidAt)
-      .reduce((sum, c) => sum + (c.paidAmountCents ?? c.amountCents), 0) +
+    utilityPaymentsPaidInMonth.reduce((sum, p) => sum + p.amountCents, 0) +
+    manualChargesPaidInMonth.reduce((sum, c) => sum + (c.paidAmountCents ?? c.amountCents), 0) +
     confirmedCardExpenseCents;
 
   const confirmedNetCents = realizedIncomeCents - confirmedExpenseCents;

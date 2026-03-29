@@ -20,6 +20,7 @@ type ForecastLike = {
   amountCents: number;
   kind: "MONTHLY" | "ANNUAL" | "INSTALLMENTS" | "ONE_TIME";
   startsAt: Date | null;
+  endsAt: Date | null;
   oneTimeAt: Date | null;
   installmentsTotal: number | null;
   utilityAccount: {
@@ -31,6 +32,8 @@ function occursInMonth(forecast: ForecastLike, monthStart: Date): boolean {
   if (forecast.status !== "ACTIVE") return false;
   if (forecast.utilityAccount.status !== "ACTIVE") return false;
   if (forecast.amountCents <= 0) return false;
+
+  if (forecast.endsAt && monthsDiffUtc(monthStart, forecast.endsAt) > 0) return false;
 
   switch (forecast.kind) {
     case "ONE_TIME": {
@@ -101,6 +104,10 @@ function parseOptionalYearMonth(raw: unknown): Date | undefined {
   if (!Number.isInteger(year) || !Number.isInteger(month)) return undefined;
   if (month < 1 || month > 12) return undefined;
   return new Date(Date.UTC(year, month - 1, 1));
+}
+
+function monthStartUtcFromDate(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 }
 
 export async function assignForecastToCard(formData: FormData): Promise<boolean> {
@@ -262,6 +269,7 @@ export async function payCreditCardInvoice(formData: FormData): Promise<boolean>
           amountCents: true,
           kind: true,
           startsAt: true,
+          endsAt: true,
           oneTimeAt: true,
           installmentsTotal: true,
           utilityAccount: { select: { status: true, name: true } },
@@ -914,9 +922,9 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
     });
 
   if (!parsed.success) return false;
-  const month = parseOptionalYearMonth(parsed.data.month);
+  const monthInput = parseOptionalYearMonth(parsed.data.month);
   const amountCents = parseMoneyToCents(parsed.data.amount);
-  if (!month || amountCents === null) return false;
+  if (!monthInput || amountCents === null) return false;
   if (amountCents <= 0) return false;
 
   const dueDayRaw = String(parsed.data.dueDay ?? "").trim();
@@ -932,9 +940,25 @@ export async function createManualCharge(formData: FormData): Promise<boolean> {
 
   if (creditCardId && !occurredAt) return false;
 
-  const derivedDueDay = creditCardId
-    ? occurredAt.getUTCDate()
-    : dueDay ?? (occurredAt ? occurredAt.getUTCDate() : undefined);
+  // Month semantics:
+  // - Card charges: month is the invoice month (user-selected)
+  // - Direct charges: month follows the actual date when provided
+  const month = creditCardId
+    ? monthInput
+    : paidAt
+      ? monthStartUtcFromDate(paidAt)
+      : occurredAt
+        ? monthStartUtcFromDate(occurredAt)
+        : monthInput;
+
+  let derivedDueDay: number | undefined;
+  if (creditCardId) {
+    // When charging a card, the occurrence date is required.
+    if (!occurredAt) return false;
+    derivedDueDay = occurredAt.getUTCDate();
+  } else {
+    derivedDueDay = dueDay ?? (occurredAt ? occurredAt.getUTCDate() : undefined);
+  }
 
   if ((bankAccountId && !paidAt) || (!bankAccountId && paidAt)) return false;
   if (creditCardId && (bankAccountId || paidAt)) return false;
@@ -1050,7 +1074,18 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
 
       if (existing.creditCardId && !occurredAt) throw new Error("missing_occurredAt");
 
-      const derivedDueDay = existing.creditCardId && occurredAt ? occurredAt.getUTCDate() : dueDay;
+      const derivedDueDay = (() => {
+        if (existing.creditCardId) return occurredAt ? occurredAt.getUTCDate() : dueDay;
+        if (dueDay !== undefined) return dueDay;
+        if (occurredAt) return occurredAt.getUTCDate();
+        return undefined;
+      })();
+
+      const nextMonth = existing.creditCardId
+        ? undefined
+        : occurredAt
+          ? monthStartUtcFromDate(occurredAt)
+          : undefined;
 
       await tx.manualCharge.update({
         where: { id: existing.id },
@@ -1059,6 +1094,7 @@ export async function updateManualCharge(formData: FormData): Promise<boolean> {
           amountCents,
           dueDay: derivedDueDay,
           occurredAt,
+          month: nextMonth,
           cardConfirmedAmountCents: existing.creditCardId ? amountCents : undefined,
           cardConfirmedAt: existing.creditCardId ? occurredAt : undefined,
           paidAmountCents: wasPaidDirect ? amountCents : undefined,

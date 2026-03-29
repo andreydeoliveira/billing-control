@@ -483,6 +483,7 @@ const CreateIncomeForecastSchema = z.object({
   amountCents: z.number().int().positive(),
   kind: ForecastKindSchema,
   startsAt: z.date().optional(),
+  endsAt: z.date().optional(),
   dueDay: z.number().int().min(1).max(31).optional(),
   installmentsTotal: z.number().int().min(1).max(120).optional(),
   oneTimeAt: z.date().optional(),
@@ -500,6 +501,7 @@ export async function createIncomeForecast(formData: FormData) {
 
   const kind = String(formData.get("kind") ?? "MONTHLY");
   const startsAtMonth = parseOptionalYearMonth(formData.get("startsAtMonth"));
+  const endsAtMonth = parseOptionalYearMonth(formData.get("endsAtMonth"));
   const startsAtDate = parseOptionalDate(formData.get("startsAtDate"));
   const oneTimeAt = parseOptionalDate(formData.get("oneTimeAt"));
   const dueDay = parseOptionalInt(formData.get("dueDay"));
@@ -507,6 +509,10 @@ export async function createIncomeForecast(formData: FormData) {
   const observationRaw = String(formData.get("observation") ?? "").trim();
 
   const startsAt = kind === "INSTALLMENTS" ? startsAtDate : startsAtMonth;
+  const endsAt = kind === "MONTHLY" || kind === "ANNUAL" ? endsAtMonth : undefined;
+
+  if ((kind === "MONTHLY" || kind === "ANNUAL") && endsAtMonth && startsAtMonth && endsAtMonth.getTime() < startsAtMonth.getTime()) return false;
+  if (!(kind === "MONTHLY" || kind === "ANNUAL") && endsAtMonth) return false;
 
   const parsed = CreateIncomeForecastSchema.safeParse({
     incomeSourceId: String(formData.get("incomeSourceId") ?? ""),
@@ -514,6 +520,7 @@ export async function createIncomeForecast(formData: FormData) {
     amountCents,
     kind,
     startsAt: startsAt ?? undefined,
+    endsAt: endsAt ?? undefined,
     dueDay: dueDay ?? undefined,
     installmentsTotal: installmentsTotal ?? undefined,
     oneTimeAt: oneTimeAt ?? undefined,
@@ -530,6 +537,7 @@ export async function createIncomeForecast(formData: FormData) {
       amountCents: parsed.data.amountCents,
       kind: parsed.data.kind,
       startsAt: parsed.data.startsAt,
+      endsAt: parsed.data.endsAt,
       dueDay: parsed.data.dueDay,
       installmentsTotal: parsed.data.installmentsTotal,
       oneTimeAt: parsed.data.oneTimeAt,
@@ -548,6 +556,7 @@ export async function updateIncomeForecast(formData: FormData) {
 
   const kind = String(formData.get("kind") ?? "MONTHLY");
   const startsAtMonth = parseOptionalYearMonth(formData.get("startsAtMonth"));
+  const endsAtMonth = parseOptionalYearMonth(formData.get("endsAtMonth"));
   const startsAtDate = parseOptionalDate(formData.get("startsAtDate"));
   const oneTimeAt = parseOptionalDate(formData.get("oneTimeAt"));
   const dueDay = parseOptionalInt(formData.get("dueDay"));
@@ -555,6 +564,10 @@ export async function updateIncomeForecast(formData: FormData) {
   const observationRaw = String(formData.get("observation") ?? "").trim();
 
   const startsAt = kind === "INSTALLMENTS" ? startsAtDate : startsAtMonth;
+  const endsAt = kind === "MONTHLY" || kind === "ANNUAL" ? endsAtMonth : undefined;
+
+  if ((kind === "MONTHLY" || kind === "ANNUAL") && endsAtMonth && startsAtMonth && endsAtMonth.getTime() < startsAtMonth.getTime()) return false;
+  if (!(kind === "MONTHLY" || kind === "ANNUAL") && endsAtMonth) return false;
 
   const parsed = UpdateIncomeForecastSchema.safeParse({
     id: String(formData.get("id") ?? ""),
@@ -563,6 +576,7 @@ export async function updateIncomeForecast(formData: FormData) {
     amountCents,
     kind,
     startsAt: startsAt ?? undefined,
+    endsAt: endsAt ?? undefined,
     dueDay: dueDay ?? undefined,
     installmentsTotal: installmentsTotal ?? undefined,
     oneTimeAt: oneTimeAt ?? undefined,
@@ -580,6 +594,7 @@ export async function updateIncomeForecast(formData: FormData) {
       amountCents: parsed.data.amountCents,
       kind: parsed.data.kind,
       startsAt: parsed.data.startsAt,
+      endsAt: parsed.data.endsAt,
       dueDay: parsed.data.dueDay,
       installmentsTotal: parsed.data.installmentsTotal,
       oneTimeAt: parsed.data.oneTimeAt,
@@ -615,6 +630,8 @@ const CreateForecastSchema = z
 
     // MONTHLY/ANNUAL use startsAtMonth (1st of month)
     startsAtMonth: z.date().optional(),
+    // Optional end for MONTHLY/ANNUAL (1st of month)
+    endsAtMonth: z.date().optional(),
     // INSTALLMENTS uses a full date
     startsAtDate: z.date().optional(),
     dueDay: z.number().int().min(1).max(31).optional(),
@@ -632,9 +649,16 @@ const CreateForecastSchema = z
       if (!val.dueDay) {
         ctx.addIssue({ code: "custom", message: "Dia da cobrança é obrigatório.", path: ["dueDay"] });
       }
+
+      if (val.endsAtMonth && val.startsAtMonth && val.endsAtMonth.getTime() < val.startsAtMonth.getTime()) {
+        ctx.addIssue({ code: "custom", message: "Data final não pode ser antes do início.", path: ["endsAtMonth"] });
+      }
     }
 
     if (val.kind === "INSTALLMENTS") {
+      if (val.endsAtMonth) {
+        ctx.addIssue({ code: "custom", message: "Data final só se aplica a Mensal/Anual.", path: ["endsAtMonth"] });
+      }
       if (!val.installmentsTotal) {
         ctx.addIssue({ code: "custom", message: "Total de parcelas é obrigatório.", path: ["installmentsTotal"] });
       }
@@ -647,6 +671,9 @@ const CreateForecastSchema = z
     }
 
     if (val.kind === "ONE_TIME") {
+      if (val.endsAtMonth) {
+        ctx.addIssue({ code: "custom", message: "Data final só se aplica a Mensal/Anual.", path: ["endsAtMonth"] });
+      }
       if (!val.oneTimeAt) {
         ctx.addIssue({ code: "custom", message: "Data da cobrança é obrigatória.", path: ["oneTimeAt"] });
       }
@@ -667,6 +694,7 @@ export async function createForecast(formData: FormData) {
     amountCents,
     kind: String(formData.get("kind") ?? "MONTHLY"),
     startsAtMonth: parseOptionalYearMonth(formData.get("startsAtMonth")),
+    endsAtMonth: parseOptionalYearMonth(formData.get("endsAtMonth")),
     startsAtDate: parseOptionalDate(formData.get("startsAtDate")),
     dueDay: parseOptionalInt(formData.get("dueDay")),
     installmentsTotal: parseOptionalInt(formData.get("installmentsTotal")),
@@ -688,6 +716,7 @@ export async function createForecast(formData: FormData) {
           : parsed.data.kind === "INSTALLMENTS"
             ? parsed.data.startsAtDate
             : null,
+      endsAt: parsed.data.kind === "MONTHLY" || parsed.data.kind === "ANNUAL" ? (parsed.data.endsAtMonth ?? null) : null,
       dueDay:
         parsed.data.kind === "MONTHLY" || parsed.data.kind === "ANNUAL" || parsed.data.kind === "INSTALLMENTS"
           ? parsed.data.dueDay
@@ -715,6 +744,7 @@ export async function updateForecast(formData: FormData) {
     amountCents,
     kind: String(formData.get("kind") ?? "MONTHLY"),
     startsAtMonth: parseOptionalYearMonth(formData.get("startsAtMonth")),
+    endsAtMonth: parseOptionalYearMonth(formData.get("endsAtMonth")),
     startsAtDate: parseOptionalDate(formData.get("startsAtDate")),
     dueDay: parseOptionalInt(formData.get("dueDay")),
     installmentsTotal: parseOptionalInt(formData.get("installmentsTotal")),
@@ -737,6 +767,7 @@ export async function updateForecast(formData: FormData) {
           : parsed.data.kind === "INSTALLMENTS"
             ? parsed.data.startsAtDate
             : null,
+      endsAt: parsed.data.kind === "MONTHLY" || parsed.data.kind === "ANNUAL" ? (parsed.data.endsAtMonth ?? null) : null,
       dueDay:
         parsed.data.kind === "MONTHLY" || parsed.data.kind === "ANNUAL" || parsed.data.kind === "INSTALLMENTS"
           ? parsed.data.dueDay

@@ -67,6 +67,7 @@ type ForecastChoice = {
 };
 
 type IncomeItem = {
+  rowKey: string;
   incomeForecastId: string;
   label: string;
   bankAccountId: string | null;
@@ -78,6 +79,7 @@ type IncomeItem = {
   receivedAt: string | null; // YYYY-MM-DD
   receivedBankAccountName: string | null;
   receivedBankAccountBank: string | null;
+  receiptMonth?: string | null; // YYYY-MM (period month to undo)
 };
 
 type IncomeEntry = {
@@ -90,6 +92,7 @@ type IncomeEntry = {
 
 type DirectItem =
   | {
+      rowKey: string;
       kind: "forecast";
       forecastId: string;
       label: string;
@@ -98,13 +101,17 @@ type DirectItem =
       paid: boolean;
       paidAmountCents: number | null;
       paidAt: string | null; // YYYY-MM-DD
+      paymentMonth?: string | null; // YYYY-MM (original due month)
     }
   | {
+      rowKey: string;
       kind: "manual";
       manualChargeId: string;
       label: string;
       amountCents: number;
       dueDay: number | null;
+      occurredAt?: string | null; // YYYY-MM-DD
+      observation?: string | null;
       paid: boolean;
       paidAmountCents: number | null;
       paidAt?: string | null; // YYYY-MM-DD
@@ -150,8 +157,10 @@ type MovementLogItem = {
   date: string; // YYYY-MM-DD
   fromBankAccountId: string;
   fromBankAccountName: string;
+  fromBankAccountBank: string;
   toBankAccountId: string;
   toBankAccountName: string;
+  toBankAccountBank: string;
   amountCents: number;
 };
 
@@ -509,6 +518,8 @@ export function LancamentosClient({
     setNewIncomeSourceId("");
   }, [newIncomeEntryModal.open]);
 
+  const manageCardCreditCardId = manageCardModal.open ? manageCardModal.creditCardId : null;
+
   React.useEffect(() => {
     if (!manageCardModal.open) return;
     const group = cardGroups.find((g) => g.creditCardId === manageCardModal.creditCardId);
@@ -521,7 +532,7 @@ export function LancamentosClient({
         items: group.items,
       };
     });
-  }, [cardGroups, manageCardModal.open, manageCardModal.creditCardId]);
+  }, [cardGroups, manageCardModal.open, manageCardCreditCardId]);
 
   async function runAction(action: (fd: FormData) => Promise<boolean>, fd: FormData) {
     const ok = await action(fd);
@@ -608,7 +619,7 @@ export function LancamentosClient({
                 </tr>
               ) : (
                 incomeItems.map((it) => (
-                  <tr key={it.incomeForecastId} className="border-t border-black/10 dark:border-white/10">
+                  <tr key={it.rowKey} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-4 py-3">{it.label}</td>
                     <td className="px-4 py-3">
                       {(() => {
@@ -651,7 +662,7 @@ export function LancamentosClient({
                                 (() => {
                                   const x = new FormData();
                                   x.set("incomeForecastId", it.incomeForecastId);
-                                  x.set("month", month);
+                                  x.set("month", it.receiptMonth ?? month);
                                   return x;
                                 })(),
                               );
@@ -750,7 +761,7 @@ export function LancamentosClient({
               ) : (
                 directItems.map((it) => (
                   <tr
-                    key={it.kind === "forecast" ? it.forecastId : it.manualChargeId}
+                    key={it.rowKey}
                     className="border-t border-black/10 dark:border-white/10"
                   >
                     <td className="px-4 py-3">{it.label}</td>
@@ -795,7 +806,7 @@ export function LancamentosClient({
                                   (() => {
                                     const x = new FormData();
                                     x.set("forecastId", it.forecastId);
-                                    x.set("month", month);
+                                    x.set("month", it.paymentMonth ?? month);
                                     return x;
                                   })(),
                                 );
@@ -828,10 +839,10 @@ export function LancamentosClient({
                                     open: true,
                                     manualChargeId: it.manualChargeId,
                                     description: it.label,
-                                    observation: null,
+                                    observation: it.observation ?? null,
                                     amountCents: it.amountCents,
                                     dueDay: it.dueDay,
-                                    occurredAt: null,
+                                    occurredAt: it.occurredAt ?? null,
                                     isCard: false,
                                   })
                                 }
@@ -1026,8 +1037,20 @@ export function LancamentosClient({
                 movementLog.map((m) => (
                   <tr key={m.id} className="border-t border-black/10 dark:border-white/10">
                     <td className="px-4 py-3">{m.date}</td>
-                    <td className="px-4 py-3">{m.fromBankAccountName}</td>
-                    <td className="px-4 py-3">{m.toBankAccountName}</td>
+                    <td className="px-4 py-3">
+                      {bankAccountLabel({
+                        id: m.fromBankAccountId,
+                        name: m.fromBankAccountName,
+                        bank: m.fromBankAccountBank,
+                      })}
+                    </td>
+                    <td className="px-4 py-3">
+                      {bankAccountLabel({
+                        id: m.toBankAccountId,
+                        name: m.toBankAccountName,
+                        bank: m.toBankAccountBank,
+                      })}
+                    </td>
                     <td className="px-4 py-3 text-right font-medium">{formatCents(m.amountCents)}</td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">

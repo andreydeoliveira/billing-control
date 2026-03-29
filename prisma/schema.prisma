@@ -136,6 +136,8 @@ model IncomeForecast {
   // MONTHLY/ANNUAL: startsAtMonth is represented by startsAt (use the 1st day of the month)
   // INSTALLMENTS: startsAt is a full date
   startsAt          DateTime?
+  // Optional end for MONTHLY/ANNUAL forecasts (use the 1st day of the month)
+  endsAt            DateTime?
   dueDay            Int?
   installmentsTotal Int?
   oneTimeAt         DateTime?
@@ -222,6 +224,8 @@ model Forecast {
   // MONTHLY/ANNUAL: startsAtMonth is represented by startsAt (use the 1st day of the month)
   // INSTALLMENTS: startsAt is a full date
   startsAt          DateTime?
+  // Optional end for MONTHLY/ANNUAL forecasts (use the 1st day of the month)
+  endsAt            DateTime?
   dueDay            Int?
   installmentsTotal Int?
   oneTimeAt         DateTime?
