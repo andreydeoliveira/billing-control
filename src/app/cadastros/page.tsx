@@ -11,6 +11,8 @@ import {
   deleteIncomeSource,
   deleteForecast,
   deleteUtilityAccount,
+  recalculateAllBankAccounts,
+  recalculateBankAccountBalance,
   recordBankYield,
   updateIncomeForecast,
   updateIncomeSource,
@@ -63,6 +65,94 @@ export default async function CadastrosPage(props: {
       })
     : [];
 
+  const bankAccountIds = bankAccounts.map((a) => a.id);
+
+  const movementsByAccountId: Record<
+    string,
+    { id: string; occurredAt: Date; description: string; kind: "OPENING" | "PAYMENT" | "INCOME" | "TRANSFER" | "YIELD" | "ADJUSTMENT"; deltaCents: number }[]
+  > = {};
+
+  if (bankAccountIds.length) {
+    const lists = await Promise.all(
+      bankAccountIds.map((bankAccountId) =>
+        prisma.bankAccountMovement.findMany({
+          where: { bankAccountId },
+          select: { id: true, occurredAt: true, description: true, kind: true, deltaCents: true },
+          orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+          take: 2000,
+        }),
+      ),
+    );
+
+    for (let i = 0; i < bankAccountIds.length; i++) {
+      movementsByAccountId[bankAccountIds[i]] = lists[i].map((m) => ({
+        id: m.id,
+        occurredAt: m.occurredAt,
+        description: m.description,
+        kind: m.kind,
+        deltaCents: m.deltaCents,
+      }));
+    }
+  }
+
+  const bankMovementsByAccountId: Record<
+    string,
+    {
+      id: string;
+      occurredAt: string; // YYYY-MM-DD
+      description: string;
+      kind: "payment" | "income" | "transfer" | "yield";
+      deltaCents: number;
+      balanceAfterCents: number;
+    }[]
+  > = {};
+
+  for (const acct of bankAccounts) {
+    const raw = movementsByAccountId[acct.id] ?? [];
+    const list = (bankMovementsByAccountId[acct.id] = raw.map((m) => ({
+      id: m.id,
+      occurredAt: m.occurredAt.toISOString().slice(0, 10),
+      description: m.description,
+      kind: (m.kind === "PAYMENT"
+        ? "payment"
+        : m.kind === "INCOME"
+          ? "income"
+          : m.kind === "TRANSFER"
+            ? "transfer"
+            : "yield") as "payment" | "income" | "transfer" | "yield",
+      deltaCents: m.deltaCents,
+      balanceAfterCents: 0,
+    })));
+
+    let running = acct.balanceCents;
+    for (const row of list) {
+      row.balanceAfterCents = running;
+      running = running - row.deltaCents;
+    }
+  }
+
+  const bankMovementSummaryByAccountId: Record<
+    string,
+    {
+      storedBalanceCents: number;
+      computedBalanceCents: number;
+      diffCents: number;
+      movementsCount: number;
+    }
+  > = {};
+
+  for (const acct of bankAccounts) {
+    const list = bankMovementsByAccountId[acct.id] ?? [];
+    const computed = list.reduce((sum, r) => sum + r.deltaCents, 0);
+    const stored = acct.balanceCents;
+    bankMovementSummaryByAccountId[acct.id] = {
+      storedBalanceCents: stored,
+      computedBalanceCents: computed,
+      diffCents: stored - computed,
+      movementsCount: list.length,
+    };
+  }
+
   const bankYieldRecordsByAccountId: Record<
     string,
     {
@@ -100,6 +190,8 @@ export default async function CadastrosPage(props: {
         yieldMode: a.yieldMode,
       }))}
       bankYieldRecordsByAccountId={bankYieldRecordsByAccountId}
+      bankMovementsByAccountId={bankMovementsByAccountId}
+      bankMovementSummaryByAccountId={bankMovementSummaryByAccountId}
       creditCards={creditCards.map((c) => ({
         id: c.id,
         name: c.name,
@@ -173,6 +265,9 @@ export default async function CadastrosPage(props: {
         createForecast,
         updateForecast,
         deleteForecast,
+
+        recalculateBankAccountBalance,
+        recalculateAllBankAccounts,
       }}
     />
   );

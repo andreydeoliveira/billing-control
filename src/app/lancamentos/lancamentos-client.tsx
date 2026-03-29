@@ -10,6 +10,7 @@ import {
   assignManualChargeToCard,
   confirmCardForecastAmount,
   createIncomeEntry,
+  updateIncomeEntry,
   createBankTransfer,
   createManualCharge,
   deleteManualCharge,
@@ -88,7 +89,17 @@ type IncomeEntry = {
   description: string;
   category: string | null;
   amountCents: number;
+  bankAccountId: string | null;
+  bankAccountName: string | null;
+  bankAccountBank: string | null;
 };
+
+type EditIncomeEntryModalState =
+  | { open: false }
+  | {
+      open: true;
+      entry: IncomeEntry;
+    };
 
 type DirectItem =
   | {
@@ -260,6 +271,46 @@ function isoDateInSelectedMonth(month: string, preferredDay: number | null): str
   const daysInMonth = new Date(Date.UTC(year, month1, 0)).getUTCDate();
   const day = Math.min(Math.max(1, desiredDay), daysInMonth);
   return `${year}-${pad2(month1)}-${pad2(day)}`;
+}
+
+type LastBankPaymentDefaults = {
+  bankAccountId: string;
+  paidAt: string; // YYYY-MM-DD
+};
+
+type LastTransferDefaults = {
+  fromBankAccountId: string;
+  toBankAccountId: string;
+};
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function readLocalStorageJson<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorageJson(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
+
+function lastBankPaymentKey(month: string): string {
+  return `billing-control:lancamentos:lastBankPayment:${month}`;
+}
+
+function lastTransferKey(month: string): string {
+  return `billing-control:lancamentos:lastTransfer:${month}`;
 }
 
 function ModalShell({
@@ -477,12 +528,19 @@ export function LancamentosClient({
   const [newChargeUtilityAccountId, setNewChargeUtilityAccountId] = React.useState<string>("");
   const [newChargeAmount, setNewChargeAmount] = React.useState<string>("");
 
+  const [newChargePaidAt, setNewChargePaidAt] = React.useState<string>(isoDateInSelectedMonth(month, null));
+  const [newChargeBankAccountId, setNewChargeBankAccountId] = React.useState<string>(bankAccounts[0]?.id ?? "");
+
+  const [transferFromBankAccountId, setTransferFromBankAccountId] = React.useState<string>(bankAccounts[0]?.id ?? "");
+  const [transferToBankAccountId, setTransferToBankAccountId] = React.useState<string>(bankAccounts[0]?.id ?? "");
+
   const [payUtilityModal, setPayUtilityModal] = React.useState<PayUtilityModalState>({ open: false });
   const [manageCardModal, setManageCardModal] = React.useState<ManageCardModalState>({ open: false });
   const [confirmCardItemModal, setConfirmCardItemModal] = React.useState<ConfirmCardItemModalState>({ open: false });
   const [payInvoiceModal, setPayInvoiceModal] = React.useState<PayInvoiceModalState>({ open: false });
   const [receiveIncomeModal, setReceiveIncomeModal] = React.useState<ReceiveIncomeModalState>({ open: false });
   const [newIncomeEntryModal, setNewIncomeEntryModal] = React.useState<NewIncomeEntryModalState>({ open: false });
+  const [editIncomeEntryModal, setEditIncomeEntryModal] = React.useState<EditIncomeEntryModalState>({ open: false });
   const [newIncomeSourceId, setNewIncomeSourceId] = React.useState<string>("");
   const [transferModal, setTransferModal] = React.useState<TransferModalState>({ open: false });
   const [editManualChargeModal, setEditManualChargeModal] = React.useState<EditManualChargeModalState>({ open: false });
@@ -511,7 +569,33 @@ export function LancamentosClient({
     // Always start blank; user chooses the account.
     setNewChargeUtilityAccountId("");
     setNewChargeAmount("");
-  }, [newChargeModal.open, bankAccounts.length]);
+
+    // Prefill bank payment defaults for this month (last used in this month).
+    const stored = readLocalStorageJson<LastBankPaymentDefaults>(lastBankPaymentKey(month));
+    const storedBankAccountId = stored?.bankAccountId ?? "";
+    const storedPaidAt = stored?.paidAt ?? "";
+    const bankAccountId = bankAccounts.some((b) => b.id === storedBankAccountId)
+      ? storedBankAccountId
+      : bankAccounts[0]?.id ?? "";
+    const paidAt = isIsoDate(storedPaidAt) ? storedPaidAt : isoDateInSelectedMonth(month, null);
+
+    setNewChargeBankAccountId(bankAccountId);
+    setNewChargePaidAt(paidAt);
+  }, [newChargeModal.open, month, bankAccounts]);
+
+  React.useEffect(() => {
+    if (!transferModal.open) return;
+
+    const stored = readLocalStorageJson<LastTransferDefaults>(lastTransferKey(month));
+    const storedFrom = stored?.fromBankAccountId ?? "";
+    const storedTo = stored?.toBankAccountId ?? "";
+
+    const from = bankAccounts.some((b) => b.id === storedFrom) ? storedFrom : bankAccounts[0]?.id ?? "";
+    const to = bankAccounts.some((b) => b.id === storedTo) ? storedTo : bankAccounts[0]?.id ?? "";
+
+    setTransferFromBankAccountId(from);
+    setTransferToBankAccountId(to);
+  }, [transferModal.open, month, bankAccounts]);
 
   React.useEffect(() => {
     if (!newIncomeEntryModal.open) return;
@@ -707,13 +791,15 @@ export function LancamentosClient({
               <tr>
                 <th className="px-4 py-3">Descrição</th>
                 <th className="px-4 py-3">Dia</th>
+                <th className="px-4 py-3">Conta</th>
                 <th className="px-4 py-3">Valor</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody>
               {incomeEntries.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={3}>
+                  <td className="px-4 py-4 text-zinc-600 dark:text-zinc-400" colSpan={5}>
                     Nenhuma entrada avulsa neste mês.
                   </td>
                 </tr>
@@ -728,7 +814,27 @@ export function LancamentosClient({
                     </td>
                     <td className="px-4 py-3">{dayFromIsoDate(it.date) ? String(dayFromIsoDate(it.date)) : "-"}</td>
                     <td className="px-4 py-3">
+                      {it.bankAccountName ? (
+                        <span className="text-zinc-700 dark:text-zinc-300">
+                          {it.bankAccountBank ? `${it.bankAccountName} (${it.bankAccountBank})` : it.bankAccountName}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Sem conta</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className="font-medium">{formatCents(it.amountCents)}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setEditIncomeEntryModal({ open: true, entry: it })}
+                          className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                        >
+                          Editar
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -1316,14 +1422,21 @@ export function LancamentosClient({
                 const forecastId = info.usable.forecastId;
 
                 if (paymentKind === "bank") {
+                  const bankAccountId = String(fd.get("bankAccountId") ?? "");
+                  const paidAt = String(fd.get("paidAt") ?? "");
                   const x = new FormData();
                   x.set("forecastId", forecastId);
                   x.set("month", month);
-                  x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
+                  x.set("bankAccountId", bankAccountId);
                   x.set("amount", String(fd.get("amount") ?? ""));
-                  x.set("paidAt", String(fd.get("paidAt") ?? ""));
+                  x.set("paidAt", paidAt);
                   const ok = await runAction(payUtilityForecast, x);
-                  if (ok) setNewChargeModal({ open: false });
+                  if (ok) {
+                    if (bankAccountId && isIsoDate(paidAt)) {
+                      writeLocalStorageJson(lastBankPaymentKey(month), { bankAccountId, paidAt } satisfies LastBankPaymentDefaults);
+                    }
+                    setNewChargeModal({ open: false });
+                  }
                   return;
                 }
 
@@ -1365,8 +1478,21 @@ export function LancamentosClient({
               if (observation.length) x.set("observation", observation);
 
               if (paymentKind === "bank") {
-                x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
-                x.set("paidAt", String(fd.get("paidAt") ?? ""));
+                const bankAccountId = String(fd.get("bankAccountId") ?? "");
+                const paidAt = String(fd.get("paidAt") ?? "");
+                x.set("bankAccountId", bankAccountId);
+                x.set("paidAt", paidAt);
+
+                const ok = await runAction(createManualCharge, x);
+                if (ok) {
+                  if (bankAccountId && isIsoDate(paidAt)) {
+                    writeLocalStorageJson(lastBankPaymentKey(month), { bankAccountId, paidAt } satisfies LastBankPaymentDefaults);
+                  }
+                  setNewChargeModal({ open: false });
+                } else {
+                  window.alert("Não foi possível adicionar. Revise valor e data.");
+                }
+                return;
               } else {
                 const creditCardId = String(fd.get("creditCardId") ?? "");
                 if (!creditCardId) {
@@ -1483,7 +1609,8 @@ export function LancamentosClient({
                   <input
                     type="date"
                     name="paidAt"
-                    defaultValue={isoDateInSelectedMonth(month, null)}
+                    value={newChargePaidAt}
+                    onChange={(e) => setNewChargePaidAt(e.target.value)}
                     className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                     required
                   />
@@ -1495,7 +1622,8 @@ export function LancamentosClient({
                     name="bankAccountId"
                     className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                     required
-                    defaultValue={bankAccounts[0]?.id ?? ""}
+                    value={newChargeBankAccountId}
+                    onChange={(e) => setNewChargeBankAccountId(e.target.value)}
                   >
                     {bankAccounts.map((b) => (
                       <option key={b.id} value={b.id}>
@@ -1548,6 +1676,12 @@ export function LancamentosClient({
               const incomeSourceId = String(fd.get("incomeSourceId") ?? "");
               if (!incomeSourceId) return;
 
+              const bankAccountId = String(fd.get("bankAccountId") ?? "");
+              if (!bankAccountId) {
+                window.alert("Selecione a conta bancária.");
+                return;
+              }
+
               const ok = await runAction(createIncomeEntry, fd);
               if (ok) setNewIncomeEntryModal({ open: false });
             }}
@@ -1596,8 +1730,101 @@ export function LancamentosClient({
               </label>
             </div>
 
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta bancária</span>
+              <select
+                name="bankAccountId"
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+                defaultValue={bankAccounts[0]?.id ?? ""}
+              >
+                {bankAccounts.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {bankAccountLabel(b)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
               Confirmar entrada
+            </button>
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {editIncomeEntryModal.open ? (
+        <ModalShell title="Editar entrada" onClose={() => setEditIncomeEntryModal({ open: false })}>
+          <form
+            action={async (fd) => {
+              const x = new FormData();
+              x.set("transactionId", editIncomeEntryModal.entry.id);
+              x.set("amount", String(fd.get("amount") ?? ""));
+              x.set("date", String(fd.get("date") ?? ""));
+
+              const noteRaw = String(fd.get("note") ?? "").trim();
+              if (noteRaw.length) x.set("note", noteRaw);
+              else x.set("note", "");
+
+              x.set("bankAccountId", String(fd.get("bankAccountId") ?? ""));
+
+              const ok = await runAction(updateIncomeEntry, x);
+              if (ok) setEditIncomeEntryModal({ open: false });
+            }}
+            className="grid gap-3"
+          >
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Valor</span>
+              <input
+                name="amount"
+                inputMode="decimal"
+                data-autofocus
+                defaultValue={(editIncomeEntryModal.entry.amountCents / 100).toFixed(2).replace(".", ",")}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                required
+              />
+            </label>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Data</span>
+                <input
+                  type="date"
+                  name="date"
+                  defaultValue={editIncomeEntryModal.entry.date}
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                />
+              </label>
+
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Conta bancária</span>
+                <select
+                  name="bankAccountId"
+                  className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+                  required
+                  defaultValue={editIncomeEntryModal.entry.bankAccountId ?? bankAccounts[0]?.id ?? ""}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {bankAccountLabel(b)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Observação (opcional)</span>
+              <input
+                name="note"
+                defaultValue={editIncomeEntryModal.entry.category ?? ""}
+                className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
+              />
+            </label>
+
+            <button type="submit" className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90">
+              Salvar
             </button>
           </form>
         </ModalShell>
@@ -2469,7 +2696,15 @@ export function LancamentosClient({
               }
 
               const ok = await runAction(createBankTransfer, fd);
-              if (ok) setTransferModal({ open: false });
+              if (ok) {
+                if (fromBankAccountId && toBankAccountId) {
+                  writeLocalStorageJson(lastTransferKey(month), {
+                    fromBankAccountId,
+                    toBankAccountId,
+                  } satisfies LastTransferDefaults);
+                }
+                setTransferModal({ open: false });
+              }
             }}
             className="grid gap-3"
           >
@@ -2480,7 +2715,8 @@ export function LancamentosClient({
                   name="fromBankAccountId"
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
-                  defaultValue={bankAccounts[0]?.id ?? ""}
+                  value={transferFromBankAccountId}
+                  onChange={(e) => setTransferFromBankAccountId(e.target.value)}
                 >
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>
@@ -2496,7 +2732,8 @@ export function LancamentosClient({
                   name="toBankAccountId"
                   className="h-10 rounded-lg border border-black/10 bg-background px-3 text-sm dark:border-white/10"
                   required
-                  defaultValue={bankAccounts[0]?.id ?? ""}
+                  value={transferToBankAccountId}
+                  onChange={(e) => setTransferToBankAccountId(e.target.value)}
                 >
                   {bankAccounts.map((b) => (
                     <option key={b.id} value={b.id}>

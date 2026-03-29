@@ -27,6 +27,15 @@ enum BankYieldMode {
   MONTHLY
 }
 
+enum BankAccountMovementKind {
+  OPENING
+  PAYMENT
+  INCOME
+  TRANSFER
+  YIELD
+  ADJUSTMENT
+}
+
 enum ForecastKind {
   MONTHLY
   ANNUAL
@@ -43,6 +52,9 @@ model Transaction {
 
   incomeSourceId String?
   incomeSource   IncomeSource? @relation(fields: [incomeSourceId], references: [id])
+
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
   date        DateTime
 
   createdAt DateTime @default(now())
@@ -51,6 +63,7 @@ model Transaction {
   @@index([date])
   @@index([type])
   @@index([incomeSourceId])
+  @@index([bankAccountId, date])
 }
 
 model BankAccount {
@@ -68,7 +81,9 @@ model BankAccount {
   manualCharges   ManualCharge[]
   incomeReceipts  IncomeReceipt[]
   incomeForecasts IncomeForecast[]
+  transactions    Transaction[]
   yieldRecords    BankAccountYieldRecord[]
+  movements       BankAccountMovement[]
   transfersFrom   BankTransfer[] @relation("TransferFrom")
   transfersTo     BankTransfer[] @relation("TransferTo")
 
@@ -76,6 +91,27 @@ model BankAccount {
   updatedAt DateTime @updatedAt
 
   @@index([status])
+}
+
+model BankAccountMovement {
+  id String @id @default(cuid())
+
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  kind BankAccountMovementKind
+  occurredAt DateTime
+  description String
+  deltaCents Int
+
+  refType String?
+  refId   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([bankAccountId, occurredAt])
+  @@index([bankAccountId, kind, occurredAt])
+  @@index([refType, refId])
 }
 
 model BankAccountYieldRecord {

@@ -25,6 +25,15 @@ type BankYieldRecordRow = {
   deltaCents: number;
 };
 
+type BankMovementRow = {
+  id: string;
+  occurredAt: string; // YYYY-MM-DD
+  description: string;
+  kind: "payment" | "income" | "transfer" | "yield";
+  deltaCents: number;
+  balanceAfterCents: number;
+};
+
 type CreditCardRow = {
   id: string;
   name: string;
@@ -110,6 +119,9 @@ type Actions = {
   createIncomeForecast: (formData: FormData) => Promise<boolean>;
   updateIncomeForecast: (formData: FormData) => Promise<boolean>;
   deleteIncomeForecast: (formData: FormData) => Promise<boolean>;
+
+  recalculateBankAccountBalance: (formData: FormData) => Promise<boolean>;
+  recalculateAllBankAccounts: (formData: FormData) => Promise<boolean>;
 };
 
 function formatYieldMode(mode: BankAccountRow["yieldMode"]): string {
@@ -250,7 +262,17 @@ function SubTabButton({ active, label, onClick }: { active: boolean; label: stri
   );
 }
 
-function ModalShell({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+function ModalShell({
+  title,
+  children,
+  onClose,
+  maxWidthClassName,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  maxWidthClassName?: string;
+}) {
   const contentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -273,10 +295,27 @@ function ModalShell({ title, children, onClose }: { title: string; children: Rea
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    const body = document.body;
+    const prevOverflow = body.style.overflow;
+    const prevPaddingRight = body.style.paddingRight;
+
+    const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
+    body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) body.style.paddingRight = `${scrollbarWidth}px`;
+
+    return () => {
+      body.style.overflow = prevOverflow;
+      body.style.paddingRight = prevPaddingRight;
+    };
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button type="button" aria-label="Fechar" onClick={onClose} className="absolute inset-0 bg-black/40" />
-      <div className="relative w-full max-w-xl rounded-2xl border border-black/10 bg-background p-5 shadow-sm dark:border-white/10">
+      <div
+        className={`relative flex max-h-[calc(100dvh-2rem)] w-full flex-col ${maxWidthClassName ?? "max-w-xl"} rounded-2xl border border-black/10 bg-background p-5 shadow-sm dark:border-white/10`}
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-base font-semibold">{title}</div>
@@ -291,7 +330,7 @@ function ModalShell({ title, children, onClose }: { title: string; children: Rea
           </button>
         </div>
 
-        <div ref={contentRef} className="mt-5">
+        <div ref={contentRef} className="mt-5 min-h-0 flex-1 overflow-auto">
           {children}
         </div>
       </div>
@@ -347,6 +386,8 @@ export function CadastrosClient({
   initialTab,
   bankAccounts,
   bankYieldRecordsByAccountId,
+  bankMovementsByAccountId,
+  bankMovementSummaryByAccountId,
   creditCards,
   utilityAccounts,
   incomeSources,
@@ -357,6 +398,11 @@ export function CadastrosClient({
   initialTab: TabKey;
   bankAccounts: BankAccountRow[];
   bankYieldRecordsByAccountId: Record<string, BankYieldRecordRow[]>;
+  bankMovementsByAccountId: Record<string, BankMovementRow[]>;
+  bankMovementSummaryByAccountId: Record<
+    string,
+    { storedBalanceCents: number; computedBalanceCents: number; diffCents: number; movementsCount: number }
+  >;
   creditCards: CreditCardRow[];
   utilityAccounts: UtilityAccountRow[];
   incomeSources: IncomeSourceRow[];
@@ -382,6 +428,11 @@ export function CadastrosClient({
       }
   >({ open: false });
   const [yieldHistoryModal, setYieldHistoryModal] = useState<
+    | { open: false }
+    | { open: true; bankAccountId: string; bankAccountName: string }
+  >({ open: false });
+
+  const [movementHistoryModal, setMovementHistoryModal] = useState<
     | { open: false }
     | { open: true; bankAccountId: string; bankAccountName: string }
   >({ open: false });
@@ -663,6 +714,7 @@ export function CadastrosClient({
   const closeConfirmDelete = () => setConfirmDelete({ open: false });
   const closeYieldModal = () => setYieldModal({ open: false });
   const closeYieldHistoryModal = () => setYieldHistoryModal({ open: false });
+  const closeMovementHistoryModal = () => setMovementHistoryModal({ open: false });
 
   const runSave = async (action: (formData: FormData) => Promise<boolean>, formData: FormData) => {
     const ok = await action(formData);
@@ -712,6 +764,29 @@ export function CadastrosClient({
           <TabButton active={tab === "income"} label="Entradas" onClick={() => setTabAndUrl("income")} />
         </div>
       </div>
+
+      {tab === "bank" ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <form
+            action={async () => {
+              const okConfirm = window.confirm(
+                "Recalcular todas as contas bancárias? Isso reconstrói o histórico de movimentos e ajusta os saldos para bater com os eventos.",
+              );
+              if (!okConfirm) return;
+              const fd = new FormData();
+              const ok = await actions.recalculateAllBankAccounts(fd);
+              if (ok) router.refresh();
+            }}
+          >
+            <button
+              type="submit"
+              className="h-10 rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90"
+            >
+              Recalcular tudo (contas)
+            </button>
+          </form>
+        </div>
+      ) : null}
 
       <section className="rounded-2xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-black">
         <div className="flex items-start justify-between gap-4">
@@ -776,6 +851,7 @@ export function CadastrosClient({
                   <th className="border-b border-black/10 pb-3 pr-4 dark:border-white/10">Banco</th>
                   <th className="border-b border-black/10 pb-3 pr-4 dark:border-white/10">Rendimento</th>
                   <th className="border-b border-black/10 pb-3 pr-4 dark:border-white/10">Saldo atual</th>
+                  <th className="border-b border-black/10 pb-3 pr-4 dark:border-white/10">Movimentos</th>
                   <th className="border-b border-black/10 pb-3 pr-4 dark:border-white/10">Situação</th>
                   <th className="border-b border-black/10 pb-3 dark:border-white/10 text-right">Ações</th>
                 </tr>
@@ -789,6 +865,12 @@ export function CadastrosClient({
                     <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{a.bank}</td>
                     <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{formatYieldMode(a.yieldMode)}</td>
                     <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">{formatMoneyBRLFromCents(a.balanceCents)}</td>
+                    <td className="border-b border-black/5 py-3 pr-4 dark:border-white/5">
+                      {(() => {
+                        const n = bankMovementSummaryByAccountId[a.id]?.movementsCount ?? 0;
+                        return <span className="text-zinc-700 dark:text-zinc-300">{n}</span>;
+                      })()}
+                    </td>
                     <td className="border-b border-black/5 py-3 pr-4 dark:border-white/5">
                       <StatusBadge status={a.status} />
                     </td>
@@ -825,6 +907,20 @@ export function CadastrosClient({
                             Histórico
                           </button>
                         ) : null}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMovementHistoryModal({
+                              open: true,
+                              bankAccountId: a.id,
+                              bankAccountName: a.name,
+                            })
+                          }
+                          className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10"
+                        >
+                          Movimentos
+                        </button>
                         <button type="button" onClick={() => openEditBank(a)} className="rounded-lg px-3 py-2 text-xs font-medium text-zinc-700 hover:bg-black/5 dark:text-zinc-200 dark:hover:bg-white/10">
                           Editar
                         </button>
@@ -1312,6 +1408,101 @@ export function CadastrosClient({
                     </tbody>
                   </table>
                 </div>
+              </div>
+            );
+          })()}
+        </ModalShell>
+      ) : null}
+
+      {movementHistoryModal.open ? (
+        <ModalShell
+          title={`Movimentos — ${movementHistoryModal.bankAccountName}`}
+          onClose={closeMovementHistoryModal}
+          maxWidthClassName="max-w-[calc(100dvw-2rem)]"
+        >
+          {(() => {
+            const rows = bankMovementsByAccountId[movementHistoryModal.bankAccountId] ?? [];
+            const summary = bankMovementSummaryByAccountId[movementHistoryModal.bankAccountId] ?? null;
+            return (
+              <div className="grid gap-3">
+                <div className="grid gap-2 rounded-xl border border-black/10 bg-black/5 p-3 text-sm dark:border-white/10 dark:bg-white/5">
+                  <div className="text-xs text-zinc-600 dark:text-zinc-400">Mostrando os últimos {rows.length} movimentos (afetam o saldo).</div>
+                  {summary ? (
+                    <div className="grid gap-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-zinc-700 dark:text-zinc-300">Saldo atual</span>
+                        <span className="font-medium">{formatMoneyBRLFromCents(summary.storedBalanceCents)}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-zinc-700 dark:text-zinc-300">Saldo calculado (eventos)</span>
+                        <span className="font-medium">{formatMoneyBRLFromCents(summary.computedBalanceCents)}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-zinc-700 dark:text-zinc-300">Diferença</span>
+                        <span className={`font-medium ${summary.diffCents === 0 ? "text-zinc-700 dark:text-zinc-300" : "text-amber-700 dark:text-amber-300"}`}
+                        >
+                          {formatSignedMoneyBRLFromCents(summary.diffCents)}
+                        </span>
+                      </div>
+                      {summary.diffCents !== 0 ? (
+                        <form
+                          action={async () => {
+                            const okConfirm = window.confirm(
+                              "Ajustar o saldo atual para bater com o saldo calculado pelos eventos?",
+                            );
+                            if (!okConfirm) return;
+                            const fd = new FormData();
+                            fd.set("bankAccountId", movementHistoryModal.bankAccountId);
+                            const ok = await actions.recalculateBankAccountBalance(fd);
+                            if (ok) router.refresh();
+                          }}
+                        >
+                          <button
+                            type="submit"
+                            className="mt-2 h-10 w-full rounded-lg bg-black px-4 text-sm font-medium text-white hover:bg-black/90"
+                          >
+                            Ajustar saldo (recalcular)
+                          </button>
+                        </form>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+
+                {rows.length === 0 ? (
+                  <div className="text-sm text-zinc-600 dark:text-zinc-400">
+                    Nenhum movimento encontrado para esta conta. Se você tem certeza que pagou/recebeu/transferiu por ela, isso indica que os eventos não estão cadastrados com este bankAccountId.
+                  </div>
+                ) : (
+                <div className="overflow-x-auto rounded-lg border border-black/10 dark:border-white/10">
+                  <table className="w-full border-separate border-spacing-0 table-fixed">
+                    <thead className="sticky top-0 bg-background">
+                      <tr className="text-left text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                        <th className="w-28 whitespace-nowrap border-b border-black/10 bg-background pb-3 pr-4 pl-3 pt-3 dark:border-white/10">Data</th>
+                        <th className="border-b border-black/10 bg-background pb-3 pr-4 pt-3 dark:border-white/10">Descrição</th>
+                        <th className="w-28 whitespace-nowrap border-b border-black/10 bg-background pb-3 pr-4 pt-3 dark:border-white/10 text-right">Delta</th>
+                        <th className="w-32 whitespace-nowrap border-b border-black/10 bg-background pb-3 pr-3 pt-3 dark:border-white/10 text-right">Saldo após</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {rows.map((r) => (
+                        <tr key={r.id} className="align-top">
+                          <td className="whitespace-nowrap border-b border-black/5 py-3 pr-4 pl-3 dark:border-white/5">{r.occurredAt}</td>
+                          <td className="border-b border-black/5 py-3 pr-4 text-zinc-700 dark:border-white/5 dark:text-zinc-300">
+                            <div className="break-words">{r.description}</div>
+                          </td>
+                          <td className="whitespace-nowrap border-b border-black/5 py-3 pr-4 text-right font-medium text-zinc-700 dark:border-white/5 dark:text-zinc-300">
+                            {formatSignedMoneyBRLFromCents(r.deltaCents)}
+                          </td>
+                          <td className="whitespace-nowrap border-b border-black/5 py-3 pr-3 text-right text-zinc-700 dark:border-white/5 dark:text-zinc-300">
+                            {formatMoneyBRLFromCents(r.balanceAfterCents)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                )}
               </div>
             );
           })()}

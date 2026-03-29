@@ -201,7 +201,13 @@ export async function payUtilityForecast(formData: FormData): Promise<boolean> {
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.utilityPayment.create({
+      const forecast = await tx.forecast.findUnique({
+        where: { id: parsed.data.forecastId },
+        select: { id: true, utilityAccount: { select: { name: true } } },
+      });
+      if (!forecast) throw new Error("forecast_not_found");
+
+      const payment = await tx.utilityPayment.create({
         data: {
           forecastId: parsed.data.forecastId,
           month,
@@ -215,12 +221,26 @@ export async function payUtilityForecast(formData: FormData): Promise<boolean> {
         where: { id: parsed.data.bankAccountId },
         data: { balanceCents: { decrement: amountCents } },
       });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: parsed.data.bankAccountId,
+          kind: "PAYMENT",
+          occurredAt: paidAt,
+          description: `Pagamento: ${forecast.utilityAccount.name}`,
+          deltaCents: -amountCents,
+          refType: "utilityPayment",
+          refId: payment.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }
 
@@ -305,7 +325,13 @@ export async function payCreditCardInvoice(formData: FormData): Promise<boolean>
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.creditCardInvoicePayment.create({
+      const card = await tx.creditCard.findUnique({
+        where: { id: parsed.data.creditCardId },
+        select: { id: true, name: true },
+      });
+      if (!card) throw new Error("card_not_found");
+
+      const payment = await tx.creditCardInvoicePayment.create({
         data: {
           creditCardId: parsed.data.creditCardId,
           month,
@@ -319,12 +345,26 @@ export async function payCreditCardInvoice(formData: FormData): Promise<boolean>
         where: { id: parsed.data.bankAccountId },
         data: { balanceCents: { decrement: amountCents } },
       });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: parsed.data.bankAccountId,
+          kind: "PAYMENT",
+          occurredAt: paidAt,
+          description: `Fatura cartão: ${card.name}`,
+          deltaCents: -amountCents,
+          refType: "invoicePayment",
+          refId: payment.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }
 
@@ -529,7 +569,13 @@ export async function undoUtilityForecastPayment(formData: FormData): Promise<bo
     await prisma.$transaction(async (tx) => {
       const p = await tx.utilityPayment.findUnique({
         where: { forecastId_month: { forecastId: parsed.data.forecastId, month } },
-        select: { id: true, amountCents: true, bankAccountId: true },
+        select: {
+          id: true,
+          amountCents: true,
+          bankAccountId: true,
+          paidAt: true,
+          forecast: { select: { utilityAccount: { select: { name: true } } } },
+        },
       });
       if (!p) throw new Error("notfound");
 
@@ -538,12 +584,26 @@ export async function undoUtilityForecastPayment(formData: FormData): Promise<bo
         where: { id: p.bankAccountId },
         data: { balanceCents: { increment: p.amountCents } },
       });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: p.bankAccountId,
+          kind: "ADJUSTMENT",
+          occurredAt: new Date(),
+          description: `Estorno pagamento: ${p.forecast.utilityAccount.name}`,
+          deltaCents: p.amountCents,
+          refType: "undoUtilityPayment",
+          refId: p.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }
 
@@ -563,6 +623,9 @@ export async function undoManualChargePayment(formData: FormData): Promise<boole
           paidAt: true,
           bankAccountId: true,
           paidAmountCents: true,
+          amountCents: true,
+          description: true,
+          utilityAccount: { select: { name: true } },
         },
       });
       if (!c) throw new Error("notfound");
@@ -578,12 +641,27 @@ export async function undoManualChargePayment(formData: FormData): Promise<boole
         where: { id: c.bankAccountId },
         data: { balanceCents: { increment: c.paidAmountCents } },
       });
+
+      const label = c.utilityAccount?.name ?? c.description;
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: c.bankAccountId,
+          kind: "ADJUSTMENT",
+          occurredAt: new Date(),
+          description: `Estorno pagamento manual: ${label}`,
+          deltaCents: c.paidAmountCents,
+          refType: "undoManualCharge",
+          refId: c.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }
 
@@ -615,7 +693,7 @@ export async function receiveIncomeForecast(formData: FormData): Promise<boolean
     await prisma.$transaction(async (tx) => {
       const forecast = await tx.incomeForecast.findUnique({
         where: { id: parsed.data.incomeForecastId },
-        select: { id: true, incomeSourceId: true, status: true },
+        select: { id: true, incomeSourceId: true, status: true, incomeSource: { select: { name: true } } },
       });
       if (!forecast) throw new Error("notfound");
       if (forecast.status !== "ACTIVE") throw new Error("inactive");
@@ -635,12 +713,25 @@ export async function receiveIncomeForecast(formData: FormData): Promise<boolean
         where: { id: parsed.data.bankAccountId },
         data: { balanceCents: { increment: amountCents } },
       });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: parsed.data.bankAccountId,
+          kind: "INCOME",
+          occurredAt: receivedAt,
+          description: `Recebimento: ${forecast.incomeSource.name}`,
+          deltaCents: amountCents,
+          refType: "incomeReceipt",
+          refId: `${forecast.id}:${month.toISOString()}`,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
   return true;
 }
 
@@ -668,7 +759,12 @@ export async function undoIncomeReceipt(formData: FormData): Promise<boolean> {
             month,
           },
         },
-        select: { id: true, amountCents: true, bankAccountId: true },
+        select: {
+          id: true,
+          amountCents: true,
+          bankAccountId: true,
+          incomeSource: { select: { name: true } },
+        },
       });
       if (!r) throw new Error("notfound");
 
@@ -677,17 +773,31 @@ export async function undoIncomeReceipt(formData: FormData): Promise<boolean> {
         where: { id: r.bankAccountId },
         data: { balanceCents: { decrement: r.amountCents } },
       });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: r.bankAccountId,
+          kind: "ADJUSTMENT",
+          occurredAt: new Date(),
+          description: `Estorno recebimento: ${r.incomeSource.name}`,
+          deltaCents: -r.amountCents,
+          refType: "undoIncomeReceipt",
+          refId: r.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
   return true;
 }
 
 const CreateIncomeEntrySchema = z.object({
   incomeSourceId: IdSchema,
+  bankAccountId: IdSchema,
   note: z.string().trim().max(80).optional(),
   amountCents: z.number().int().min(1),
   date: z.date(),
@@ -705,6 +815,7 @@ export async function createIncomeEntry(formData: FormData): Promise<boolean> {
 
   const parsed = CreateIncomeEntrySchema.safeParse({
     incomeSourceId: formData.get("incomeSourceId"),
+    bankAccountId: formData.get("bankAccountId"),
     note: noteRaw ? noteRaw : undefined,
     amountCents,
     date,
@@ -719,19 +830,173 @@ export async function createIncomeEntry(formData: FormData): Promise<boolean> {
   if (!incomeSource) return false;
   if (incomeSource.status !== "ACTIVE") return false;
 
-  await prisma.transaction.create({
-    data: {
-      type: "INCOME",
-      amountCents: parsed.data.amountCents,
-      description: incomeSource.name,
-      category: parsed.data.note ?? null,
-      incomeSourceId: incomeSource.id,
-      date: parsed.data.date,
-    },
+  const bankAccount = await prisma.bankAccount.findUnique({
+    where: { id: parsed.data.bankAccountId },
+    select: { id: true, status: true },
   });
+  if (!bankAccount) return false;
+  if (bankAccount.status !== "ACTIVE") return false;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const entry = await tx.transaction.create({
+        data: {
+          type: "INCOME",
+          amountCents: parsed.data.amountCents,
+          description: incomeSource.name,
+          category: parsed.data.note ?? null,
+          incomeSourceId: incomeSource.id,
+          bankAccountId: bankAccount.id,
+          date: parsed.data.date,
+        },
+      });
+
+      await tx.bankAccount.update({
+        where: { id: bankAccount.id },
+        data: { balanceCents: { increment: parsed.data.amountCents } },
+      });
+
+      const note = parsed.data.note ? ` (${parsed.data.note})` : "";
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: bankAccount.id,
+          kind: "INCOME",
+          occurredAt: parsed.data.date,
+          description: `Entrada avulsa: ${incomeSource.name}${note}`,
+          deltaCents: parsed.data.amountCents,
+          refType: "incomeEntry",
+          refId: entry.id,
+        },
+      });
+    });
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
+  return true;
+}
+
+export async function updateIncomeEntry(formData: FormData): Promise<boolean> {
+  const parsed = z
+    .object({
+      transactionId: IdSchema,
+      bankAccountId: IdSchema,
+      amount: z.any(),
+      date: z.string().min(1),
+      note: z.string().trim().max(80).optional(),
+    })
+    .safeParse({
+      transactionId: formData.get("transactionId"),
+      bankAccountId: formData.get("bankAccountId"),
+      amount: formData.get("amount"),
+      date: formData.get("date"),
+      note: formData.get("note") ? String(formData.get("note")) : undefined,
+    });
+
+  if (!parsed.success) return false;
+  const amountCents = parseMoneyToCents(parsed.data.amount);
+  if (amountCents === null || amountCents <= 0) return false;
+  const date = parseOptionalDate(parsed.data.date);
+  if (!date) return false;
+
+  const bankAccount = await prisma.bankAccount.findUnique({
+    where: { id: parsed.data.bankAccountId },
+    select: { id: true, status: true },
+  });
+  if (!bankAccount) return false;
+  if (bankAccount.status !== "ACTIVE") return false;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.transaction.findUnique({
+        where: { id: parsed.data.transactionId },
+        select: {
+          id: true,
+          type: true,
+          amountCents: true,
+          bankAccountId: true,
+          description: true,
+          incomeSource: { select: { name: true } },
+        },
+      });
+      if (!existing) throw new Error("notfound");
+      if (existing.type !== "INCOME") throw new Error("wrongtype");
+
+      const oldBankAccountId = existing.bankAccountId;
+      const oldAmountCents = existing.amountCents;
+      const newBankAccountId = bankAccount.id;
+
+      // Reconcile balances:
+      // - If old entry had a bank account, remove its effect (decrement old account).
+      // - Apply new effect to new account (increment new account).
+      // - If moving within same account, just apply the difference.
+
+      if (oldBankAccountId && oldBankAccountId === newBankAccountId) {
+        const delta = amountCents - oldAmountCents;
+        if (delta !== 0) {
+          await tx.bankAccount.update({
+            where: { id: newBankAccountId },
+            data: { balanceCents: { increment: delta } },
+          });
+        }
+      } else {
+        if (oldBankAccountId) {
+          await tx.bankAccount.update({
+            where: { id: oldBankAccountId },
+            data: { balanceCents: { decrement: oldAmountCents } },
+          });
+        }
+
+        await tx.bankAccount.update({
+          where: { id: newBankAccountId },
+          data: { balanceCents: { increment: amountCents } },
+        });
+      }
+
+      await tx.transaction.update({
+        where: { id: existing.id },
+        data: {
+          amountCents,
+          bankAccountId: newBankAccountId,
+          date,
+          category: parsed.data.note ? parsed.data.note.trim() : null,
+        },
+      });
+
+      // Keep movement log consistent with the current entry state.
+      // We remove any previous movement rows for this entry and recreate it with the new values.
+      await tx.bankAccountMovement.deleteMany({
+        where: {
+          refType: "incomeEntry",
+          refId: existing.id,
+        },
+      });
+
+      const note = parsed.data.note && parsed.data.note.trim() ? ` (${parsed.data.note.trim()})` : "";
+      const sourceName = existing.incomeSource?.name ?? existing.description;
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: newBankAccountId,
+          kind: "INCOME",
+          occurredAt: date,
+          description: `Entrada avulsa: ${sourceName}${note}`,
+          deltaCents: amountCents,
+          refType: "incomeEntry",
+          refId: existing.id,
+        },
+      });
+    });
+  } catch {
+    return false;
+  }
 
   revalidatePath("/lancamentos");
   revalidatePath("/dashboard");
+  revalidatePath("/cadastros");
   return true;
 }
 
@@ -760,7 +1025,7 @@ export async function createBankTransfer(formData: FormData): Promise<boolean> {
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.bankTransfer.create({
+      const transfer = await tx.bankTransfer.create({
         data: {
           fromBankAccountId: parsed.data.fromBankAccountId,
           toBankAccountId: parsed.data.toBankAccountId,
@@ -778,12 +1043,37 @@ export async function createBankTransfer(formData: FormData): Promise<boolean> {
         where: { id: parsed.data.toBankAccountId },
         data: { balanceCents: { increment: amountCents } },
       });
+
+      await tx.bankAccountMovement.createMany({
+        data: [
+          {
+            bankAccountId: parsed.data.fromBankAccountId,
+            kind: "TRANSFER",
+            occurredAt: transferAt,
+            description: "Transferência (saída)",
+            deltaCents: -amountCents,
+            refType: "bankTransfer",
+            refId: transfer.id,
+          },
+          {
+            bankAccountId: parsed.data.toBankAccountId,
+            kind: "TRANSFER",
+            occurredAt: transferAt,
+            description: "Transferência (entrada)",
+            deltaCents: amountCents,
+            refType: "bankTransfer",
+            refId: transfer.id,
+          },
+        ],
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }
 
@@ -855,12 +1145,26 @@ export async function updateBankTransfer(formData: FormData): Promise<boolean> {
         where: { id: parsed.data.toBankAccountId },
         data: { balanceCents: { increment: amountCents } },
       });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: parsed.data.fromBankAccountId,
+          kind: "ADJUSTMENT",
+          occurredAt: new Date(),
+          description: "Ajuste: edição de transferência",
+          deltaCents: 0,
+          refType: "bankTransfer",
+          refId: existing.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }
 
@@ -887,12 +1191,26 @@ export async function deleteBankTransfer(formData: FormData): Promise<boolean> {
       });
 
       await tx.bankTransfer.delete({ where: { id: existing.id } });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: existing.fromBankAccountId,
+          kind: "ADJUSTMENT",
+          occurredAt: new Date(),
+          description: "Estorno: remoção de transferência",
+          deltaCents: 0,
+          refType: "bankTransfer",
+          refId: existing.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }
 
@@ -1246,7 +1564,7 @@ export async function payManualCharge(formData: FormData): Promise<boolean> {
     await prisma.$transaction(async (tx) => {
       const charge = await tx.manualCharge.findUnique({
         where: { id: parsed.data.manualChargeId },
-        select: { id: true, creditCardId: true, paidAt: true },
+        select: { id: true, creditCardId: true, paidAt: true, description: true, utilityAccount: { select: { name: true } } },
       });
       if (!charge) throw new Error("notfound");
       if (charge.creditCardId) throw new Error("isCard");
@@ -1265,11 +1583,26 @@ export async function payManualCharge(formData: FormData): Promise<boolean> {
         where: { id: parsed.data.bankAccountId },
         data: { balanceCents: { decrement: amountCents } },
       });
+
+      const label = charge.utilityAccount?.name ?? charge.description;
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId: parsed.data.bankAccountId,
+          kind: "PAYMENT",
+          occurredAt: paidAt,
+          description: `Pagamento manual: ${label}`,
+          deltaCents: -amountCents,
+          refType: "manualCharge",
+          refId: charge.id,
+        },
+      });
     });
   } catch {
     return false;
   }
 
   revalidatePath("/lancamentos");
+  revalidatePath("/cadastros");
+  revalidatePath("/dashboard");
   return true;
 }

@@ -216,6 +216,8 @@ export default async function LancamentosPage(props: {
           description: true,
           category: true,
           amountCents: true,
+          bankAccountId: true,
+          bankAccount: { select: { id: true, name: true, bank: true } },
           incomeSource: { select: { id: true, name: true } },
         },
       }),
@@ -653,6 +655,9 @@ export default async function LancamentosPage(props: {
         description: e.incomeSource?.name ?? e.description,
         category: e.category,
         amountCents: e.amountCents,
+        bankAccountId: e.bankAccountId ?? null,
+        bankAccountName: e.bankAccount?.name ?? null,
+        bankAccountBank: e.bankAccount?.bank ?? null,
       }))}
       forecastChoices={forecastChoices}
       directItems={directItems}

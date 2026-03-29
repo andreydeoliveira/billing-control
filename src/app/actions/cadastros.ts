@@ -98,6 +98,18 @@ export async function createBankAccount(formData: FormData) {
       data: parsed.data,
     });
 
+    await tx.bankAccountMovement.create({
+      data: {
+        bankAccountId: acct.id,
+        kind: "OPENING",
+        occurredAt: acct.createdAt,
+        description: "Saldo inicial",
+        deltaCents: parsed.data.balanceCents,
+        refType: "bankAccount",
+        refId: acct.id,
+      },
+    });
+
     if (parsed.data.yieldMode === "CUMULATIVE" && initialYieldCents !== null) {
       await tx.bankAccountYieldRecord.create({
         data: {
@@ -158,7 +170,7 @@ export async function updateBankAccount(formData: FormData) {
     await prisma.$transaction(async (tx) => {
       const prev = await tx.bankAccount.findUnique({
         where: { id: parsed.data.id },
-        select: { id: true, yieldMode: true },
+        select: { id: true, yieldMode: true, balanceCents: true },
       });
       if (!prev) throw new Error("notfound");
 
@@ -172,6 +184,21 @@ export async function updateBankAccount(formData: FormData) {
           yieldMode: parsed.data.yieldMode,
         },
       });
+
+      if (parsed.data.balanceCents !== prev.balanceCents) {
+        const delta = parsed.data.balanceCents - prev.balanceCents;
+        await tx.bankAccountMovement.create({
+          data: {
+            bankAccountId: prev.id,
+            kind: "ADJUSTMENT",
+            occurredAt: new Date(),
+            description: "Ajuste manual de saldo",
+            deltaCents: delta,
+            refType: "bankAccount",
+            refId: prev.id,
+          },
+        });
+      }
 
       const switchingToCumulative = prev.yieldMode !== "CUMULATIVE" && parsed.data.yieldMode === "CUMULATIVE";
       if (switchingToCumulative) {
@@ -266,6 +293,18 @@ export async function recordBankYield(formData: FormData) {
         await tx.bankAccount.update({
           where: { id: acct.id },
           data: { balanceCents: { increment: deltaCents } },
+        });
+
+        await tx.bankAccountMovement.create({
+          data: {
+            bankAccountId: acct.id,
+            kind: "YIELD",
+            occurredAt: parsed.data.recordedAt,
+            description: `Rendimento (${mode})`,
+            deltaCents,
+            refType: "yield",
+            refId: `${acct.id}:${parsed.data.recordedAt.toISOString()}`,
+          },
         });
       }
     });
@@ -796,5 +835,228 @@ export async function deleteForecast(formData: FormData) {
   });
 
   revalidatePath("/cadastros");
+  return true;
+}
+
+export async function recalculateBankAccountBalance(formData: FormData): Promise<boolean> {
+  const parsed = z.object({ bankAccountId: z.string().min(1) }).safeParse({
+    bankAccountId: formData.get("bankAccountId"),
+  });
+  if (!parsed.success) return false;
+
+  const bankAccountId = parsed.data.bankAccountId;
+
+  try {
+    const acct = await prisma.bankAccount.findUnique({
+      where: { id: bankAccountId },
+      select: { id: true, createdAt: true, balanceCents: true },
+    });
+    if (!acct) return false;
+
+    const [
+      utilityPayments,
+      manualChargesPaid,
+      invoicePayments,
+      incomeReceipts,
+      incomeEntries,
+      transfers,
+      yieldRecords,
+    ] = await Promise.all([
+      prisma.utilityPayment.findMany({
+        where: { bankAccountId },
+        select: { id: true, paidAt: true, amountCents: true, forecast: { select: { utilityAccount: { select: { name: true } } } } },
+      }),
+      prisma.manualCharge.findMany({
+        where: { creditCardId: null, bankAccountId, paidAt: { not: null } },
+        select: { id: true, paidAt: true, paidAmountCents: true, amountCents: true, description: true, utilityAccount: { select: { name: true } } },
+      }),
+      prisma.creditCardInvoicePayment.findMany({
+        where: { bankAccountId },
+        select: { id: true, paidAt: true, amountCents: true, creditCard: { select: { name: true } } },
+      }),
+      prisma.incomeReceipt.findMany({
+        where: { bankAccountId },
+        select: { id: true, receivedAt: true, amountCents: true, incomeSource: { select: { name: true } } },
+      }),
+      prisma.transaction.findMany({
+        where: { type: "INCOME", bankAccountId },
+        select: { id: true, date: true, amountCents: true, description: true, category: true },
+      }),
+      prisma.bankTransfer.findMany({
+        where: { OR: [{ fromBankAccountId: bankAccountId }, { toBankAccountId: bankAccountId }] },
+        select: {
+          id: true,
+          fromBankAccountId: true,
+          toBankAccountId: true,
+          amountCents: true,
+          transferAt: true,
+          fromBankAccount: { select: { name: true, bank: true } },
+          toBankAccount: { select: { name: true, bank: true } },
+        },
+      }),
+      prisma.bankAccountYieldRecord.findMany({
+        where: { bankAccountId },
+        select: { id: true, recordedAt: true, mode: true, deltaCents: true },
+      }),
+    ]);
+
+    const movements: Array<{ occurredAt: Date; kind: "PAYMENT" | "INCOME" | "TRANSFER" | "YIELD"; description: string; deltaCents: number; refType: string; refId: string }> = [];
+
+    for (const p of utilityPayments) {
+      movements.push({
+        occurredAt: p.paidAt,
+        kind: "PAYMENT",
+        description: `Pagamento: ${p.forecast.utilityAccount.name}`,
+        deltaCents: -p.amountCents,
+        refType: "utilityPayment",
+        refId: p.id,
+      });
+    }
+
+    for (const c of manualChargesPaid) {
+      if (!c.paidAt) continue;
+      const label = c.utilityAccount?.name ?? c.description;
+      const cents = c.paidAmountCents ?? c.amountCents;
+      movements.push({
+        occurredAt: c.paidAt,
+        kind: "PAYMENT",
+        description: `Pagamento manual: ${label}`,
+        deltaCents: -cents,
+        refType: "manualCharge",
+        refId: c.id,
+      });
+    }
+
+    for (const p of invoicePayments) {
+      movements.push({
+        occurredAt: p.paidAt,
+        kind: "PAYMENT",
+        description: `Fatura cartão: ${p.creditCard.name}`,
+        deltaCents: -p.amountCents,
+        refType: "invoicePayment",
+        refId: p.id,
+      });
+    }
+
+    for (const r of incomeReceipts) {
+      movements.push({
+        occurredAt: r.receivedAt,
+        kind: "INCOME",
+        description: `Recebimento: ${r.incomeSource.name}`,
+        deltaCents: r.amountCents,
+        refType: "incomeReceipt",
+        refId: r.id,
+      });
+    }
+
+    for (const e of incomeEntries) {
+      const note = e.category ? ` (${e.category})` : "";
+      movements.push({
+        occurredAt: e.date,
+        kind: "INCOME",
+        description: `Entrada avulsa: ${e.description}${note}`,
+        deltaCents: e.amountCents,
+        refType: "incomeEntry",
+        refId: e.id,
+      });
+    }
+
+    for (const t of transfers) {
+      const fromLabel = t.fromBankAccount.bank ? `${t.fromBankAccount.name} (${t.fromBankAccount.bank})` : t.fromBankAccount.name;
+      const toLabel = t.toBankAccount.bank ? `${t.toBankAccount.name} (${t.toBankAccount.bank})` : t.toBankAccount.name;
+      const desc = `Transferência: ${fromLabel} → ${toLabel}`;
+      if (t.fromBankAccountId === bankAccountId) {
+        movements.push({
+          occurredAt: t.transferAt,
+          kind: "TRANSFER",
+          description: desc,
+          deltaCents: -t.amountCents,
+          refType: "bankTransfer",
+          refId: t.id,
+        });
+      }
+      if (t.toBankAccountId === bankAccountId) {
+        movements.push({
+          occurredAt: t.transferAt,
+          kind: "TRANSFER",
+          description: desc,
+          deltaCents: t.amountCents,
+          refType: "bankTransfer",
+          refId: t.id,
+        });
+      }
+    }
+
+    for (const y of yieldRecords) {
+      movements.push({
+        occurredAt: y.recordedAt,
+        kind: "YIELD",
+        description: `Rendimento (${y.mode})`,
+        deltaCents: y.deltaCents,
+        refType: "yieldRecord",
+        refId: y.id,
+      });
+    }
+
+    const sumDeltas = movements.reduce((sum, m) => sum + m.deltaCents, 0);
+    const openingDelta = acct.balanceCents - sumDeltas;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.bankAccountMovement.deleteMany({ where: { bankAccountId } });
+
+      await tx.bankAccountMovement.create({
+        data: {
+          bankAccountId,
+          kind: "OPENING",
+          occurredAt: acct.createdAt,
+          description: "Saldo inicial (base)",
+          deltaCents: openingDelta,
+          refType: "opening",
+          refId: bankAccountId,
+        },
+      });
+
+      if (movements.length) {
+        await tx.bankAccountMovement.createMany({
+          data: movements.map((m) => ({
+            bankAccountId,
+            kind: m.kind,
+            occurredAt: m.occurredAt,
+            description: m.description,
+            deltaCents: m.deltaCents,
+            refType: m.refType,
+            refId: m.refId,
+          })),
+        });
+      }
+
+      const computedBalanceCents = openingDelta + sumDeltas;
+      await tx.bankAccount.update({ where: { id: bankAccountId }, data: { balanceCents: computedBalanceCents } });
+    });
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/cadastros");
+  revalidatePath("/lancamentos");
+  revalidatePath("/dashboard");
+  return true;
+}
+
+export async function recalculateAllBankAccounts(_formData: FormData): Promise<boolean> {
+  try {
+    const accounts = await prisma.bankAccount.findMany({ select: { id: true } });
+    for (const a of accounts) {
+      const fd = new FormData();
+      fd.set("bankAccountId", a.id);
+      await recalculateBankAccountBalance(fd);
+    }
+  } catch {
+    return false;
+  }
+
+  revalidatePath("/cadastros");
+  revalidatePath("/lancamentos");
+  revalidatePath("/dashboard");
   return true;
 }
